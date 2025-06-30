@@ -7,9 +7,16 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'Public')));
+// Replace the static files line with:
+app.use(express.static(path.join(__dirname, 'Public'), {
+  extensions: ['html'],
+  index: 'index.html'
+}));
 
+// Add explicit route handler
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'Public', 'index.html'));
+});
 const players = {};
 const loveItems = [];
 const scores = {};
