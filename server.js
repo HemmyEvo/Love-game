@@ -5,27 +5,40 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = socketIo(server, {
+  cors: {
+    origin: "*", // Allow all origins (adjust for production)
+    methods: ["GET", "POST"]
+  }
+});
 
-// Replace the static files line with:
+// Serve static files from Public directory
 app.use(express.static(path.join(__dirname, 'Public'), {
-  extensions: ['html'],
-  index: 'index.html'
-}));
+  extensions: ['html', 'css', 'js'],
+  setHeaders: (res) => {
+    res.set('Cache-Control', 'public, max-age=0');
+  }
+});
 
-// Add explicit route handler
+// Route handlers (MUST come after static files middleware)
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'Public', 'index.html'));
 });
+
+// API endpoint for health checks
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
+// Socket.io connection handling
 const players = {};
 const loveItems = [];
 const scores = {};
 
-// Generate random love items
 function generateLoveItems() {
   for (let i = 0; i < 20; i++) {
     loveItems.push({
-      id: i,
+      id: Date.now() + i, // More unique IDs
       x: Math.random() * 780,
       y: Math.random() * 580,
       type: Math.floor(Math.random() * 3)
@@ -33,77 +46,69 @@ function generateLoveItems() {
   }
 }
 
-// Check collisions
 function checkCollisions() {
-  for (const playerId in players) {
+  Object.keys(players).forEach(playerId => {
     const player = players[playerId];
-    for (let i = loveItems.length - 1; i >= 0; i--) {
-      const item = loveItems[i];
+    loveItems.forEach((item, index) => {
       if (
         player.x < item.x + 20 &&
         player.x + 50 > item.x &&
         player.y < item.y + 20 &&
         player.y + 50 > item.y
       ) {
-        // Collision detected
         scores[playerId] = (scores[playerId] || 0) + 1;
-        loveItems.splice(i, 1);
-        
-        // Add new love item
+        loveItems.splice(index, 1);
         loveItems.push({
-          id: Date.now() + Math.random(),
+          id: Date.now(),
           x: Math.random() * 780,
           y: Math.random() * 580,
           type: Math.floor(Math.random() * 3)
         });
-        
         io.emit('scoreUpdate', { playerId, score: scores[playerId] });
       }
-    }
-  }
+    });
+  });
 }
 
 io.on('connection', (socket) => {
-  console.log('New player connected:', socket.id);
-  
-  // Add new player
+  console.log('New connection:', socket.id);
+
+  // Initialize player
   players[socket.id] = {
     x: Math.random() * 750,
     y: Math.random() * 550,
     color: `hsl(${Math.random() * 360}, 100%, 50%)`
   };
   scores[socket.id] = 0;
-  
-  // Send initial game state
+
+  // Send initial state
   socket.emit('init', { 
-    playerId: socket.id, 
-    players, 
-    loveItems, 
-    scores 
+    playerId: socket.id,
+    players,
+    loveItems,
+    scores
   });
-  
-  // Broadcast new player to others
-  socket.broadcast.emit('newPlayer', { 
-    playerId: socket.id, 
-    player: players[socket.id] 
+
+  // Notify others
+  socket.broadcast.emit('newPlayer', {
+    playerId: socket.id,
+    player: players[socket.id]
   });
-  
-  // Handle player movement
+
+  // Movement handler
   socket.on('move', (data) => {
     if (players[socket.id]) {
-      players[socket.id].x = data.x;
-      players[socket.id].y = data.y;
+      players[socket.id] = { ...players[socket.id], ...data };
       socket.broadcast.emit('playerMoved', {
         playerId: socket.id,
-        x: data.x,
-        y: data.y
+        ...data
       });
     }
   });
-  
-  // Handle disconnection
+
+  // Disconnection handler
   socket.on('disconnect', () => {
-    console.log('Player disconnected:', socket.id);
+    console.log('Disconnected:', socket.id);
     delete players[socket.id];
     delete scores[socket.id];
     io.emit('playerDisconnected', socket.id);
@@ -111,14 +116,20 @@ io.on('connection', (socket) => {
 });
 
 // Game loop
-setInterval(() => {
+const gameLoop = setInterval(() => {
   checkCollisions();
   io.emit('gameUpdate', { players, loveItems });
 }, 1000 / 60);
 
-// Start server
+// Server startup
 generateLoveItems();
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+// Cleanup on exit
+process.on('SIGTERM', () => {
+  clearInterval(gameLoop);
+  server.close();
 });
