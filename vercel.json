@@ -9,7 +9,7 @@
   "routes": [
     {
       "src": "/",
-      "dest": "public/index.html"
+      "dest": "Public/index.html"
     },
     {
       "src": "/socket.io/(.*)",
@@ -17,7 +17,7 @@
     },
     {
       "src": "/(.*)",
-      "dest": "public/$1"
+      "dest": "Public/$1"
     }
   ]
 }
