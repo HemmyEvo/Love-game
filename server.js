@@ -1,35 +1,11 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: "*", // Allow all origins (adjust for production)
-    methods: ["GET", "POST"]
-  }
-});
-
-// Serve static files from Public directory
-app.use(express.static(path.join(__dirname, 'Public'), {
-  extensions: ['html', 'css', 'js'],
-  setHeaders: (res) => {
-    res.set('Cache-Control', 'public, max-age=0');
-  }
-});
-
-// Route handlers (MUST come after static files middleware)
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'Public', 'index.html'));
-});
-
-// API endpoint for health checks
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
-});
-
+const io = new Server(server);
+app.use(express.static("Public"));
 // Socket.io connection handling
 const players = {};
 const loveItems = [];
