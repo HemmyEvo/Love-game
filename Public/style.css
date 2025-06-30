@@ -1,0 +1,37 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background: #ffe6f2;
+  text-align: center;
+}
+
+canvas {
+  border: 2px solid #ff66b3;
+  border-radius: 10px;
+  display: block;
+  margin: 20px auto;
+  background: white;
+  box-shadow: 0 0 20px rgba(255, 102, 179, 0.3);
+}
+
+#scoreboard {
+  margin: 20px auto;
+  padding: 10px;
+  background: white;
+  border-radius: 5px;
+  width: 300px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+h1 {
+  color: #ff3399;
+}
+
+.instructions {
+  margin: 10px auto;
+  padding: 10px;
+  background: #fff0f5;
+  border-radius: 5px;
+  width: 500px;
+}
