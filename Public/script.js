@@ -31,7 +31,13 @@ let connected = false;
 let gyroEnabled = false;
 let gyroAxes = { x: 0, y: 0 };
 
-const socket = io({ transports: ["websocket", "polling"], reconnectionAttempts: 4 });
+const socket = io(window.location.origin, {
+  path: "/socket.io",
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 500,
+  timeout: 10000
+});
 
 function setStatus(text, state = "offline") {
   statusPill.textContent = text;
@@ -62,7 +68,22 @@ socket.on("connect", () => {
   setStatus("Connected • pick mode", "online");
 });
 
+socket.on("disconnect", () => {
+  connected = false;
+  setStatus("Disconnected • retrying…", "offline");
+});
+
+socket.io.on("reconnect_attempt", () => {
+  setStatus("Reconnecting…", "offline");
+});
+
+socket.io.on("reconnect", () => {
+  connected = true;
+  setStatus(roomCode ? "Reconnected" : "Connected • pick mode", "online");
+});
+
 socket.on("connect_error", () => {
+  connected = false;
   setStatus("Connection failed", "offline");
 });
 
