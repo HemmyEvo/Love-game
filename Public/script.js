@@ -34,6 +34,11 @@ let scores = {};
 let names = {};
 let connected = false;
 let socketReady = false;
+let pendingRoomCreation = false;
+const invitedCodeFromLink = (new URLSearchParams(window.location.search).get("invite") || "")
+  .toUpperCase()
+  .trim()
+  .slice(0, 6);
 
 const joystickState = { x: 0, y: 0, active: false };
 
@@ -83,16 +88,18 @@ function openInviteOverlay(code) {
   if (!code) return;
   incomingCodeElement.textContent = code;
   inviteOverlay.classList.remove("hidden");
+  inviteOverlay.classList.remove("open");
   inviteOverlay.setAttribute("aria-hidden", "false");
-  requestAnimationFrame(() => {
+  void inviteOverlay.offsetWidth;
+  setTimeout(() => {
     inviteOverlay.classList.add("open");
-  });
+  }, 60);
 }
 
 function closeInviteOverlay() {
   inviteOverlay.classList.remove("open");
   inviteOverlay.setAttribute("aria-hidden", "true");
-  setTimeout(() => inviteOverlay.classList.add("hidden"), 220);
+  setTimeout(() => inviteOverlay.classList.add("hidden"), 760);
 }
 
 function renderInvite(letter, code) {
@@ -114,8 +121,8 @@ function renderInvite(letter, code) {
   });
 
   document.getElementById("shareWhatsAppBtn").addEventListener("click", () => {
-    const text = `Love Rush invite 💌%0ARoom code: ${encodeURIComponent(code)}%0A${encodeURIComponent(inviteUrl)}`;
-    window.open(`https://wa.me/?text=${text}`, "_blank", "noopener,noreferrer");
+    const message = `Love Rush invite 💌\nRoom code: ${code}\n${inviteUrl}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   });
 }
 
@@ -141,20 +148,6 @@ socket.io.on("reconnect", () => {
   setStatus("Reconnected", "online");
 });
 
-socket.on("disconnect", () => {
-  connected = false;
-  setStatus("Disconnected • retrying…", "offline");
-});
-
-socket.io.on("reconnect_attempt", () => {
-  setStatus("Reconnecting…", "offline");
-});
-
-socket.io.on("reconnect", () => {
-  connected = true;
-  setStatus(roomCode ? "Reconnected" : "Connected • pick mode", "online");
-});
-
 socket.on("connect_error", () => {
   connected = false;
   socketReady = false;
@@ -175,7 +168,8 @@ socket.on("init", (data) => {
   updateScoreboard();
   joinError.textContent = "";
 
-  if (data.letter) renderInvite(data.letter, data.roomCode);
+  if (pendingRoomCreation && data.letter) renderInvite(data.letter, data.roomCode);
+  pendingRoomCreation = false;
 
   lobby.classList.add("compact");
   setStatus(data.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
@@ -192,16 +186,19 @@ socket.on("gameUpdate", (data) => {
 
 createRoomBtn.addEventListener("click", () => {
   if (!connected) return;
+  pendingRoomCreation = true;
   safeEmit("createRoom", { loverName: getLoverName(), withBot: false });
 });
 
 createBotBtn.addEventListener("click", () => {
   if (!connected) return;
+  pendingRoomCreation = true;
   safeEmit("createRoom", { loverName: getLoverName(), withBot: true });
 });
 
 joinRoomBtn.addEventListener("click", () => {
   if (!connected) return;
+  pendingRoomCreation = false;
   const code = roomCodeInput.value.toUpperCase().trim();
   safeEmit("joinRoom", { loverName: getLoverName(), roomCode: code });
 });
@@ -386,11 +383,9 @@ function gameLoop() {
 
 gameLoop();
 
-const inviteCode = new URLSearchParams(window.location.search).get("invite");
-if (inviteCode) {
-  const code = inviteCode.toUpperCase().trim().slice(0, 6);
-  roomCodeInput.value = code;
-  openInviteOverlay(code);
+if (invitedCodeFromLink) {
+  roomCodeInput.value = invitedCodeFromLink;
+  openInviteOverlay(invitedCodeFromLink);
 }
 
 copyIncomingCodeBtn.addEventListener("click", async () => {
