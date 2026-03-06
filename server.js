@@ -6,36 +6,18 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
-// 1. Adjusted ping times and enabled Connection State Recovery
 const io = new Server(server, {
   cors: { origin: "*" },
+  path: "/socket.io",
+  transports: ["websocket", "polling"],
   pingInterval: 25000,
   pingTimeout: 60000,
-  connectionStateRecovery: {
-    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
-    skipMiddlewares: true,
-  }
 });
 
 const publicDir = path.join(__dirname, "Public");
 app.use(express.static(publicDir));
 app.get("/", (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
-});
-
-app.get("/api/invitation", (req, res) => {
-  const roomCodeFromQuery = String(req.query.roomCode || "").toUpperCase().trim();
-  const inviteCodeFromQuery = String(req.query.inviteCode || "").toUpperCase().trim();
-  const room = rooms[roomCodeFromQuery];
-
-  const invited = Boolean(
-    room
-    && room.inviteCode
-    && inviteCodeFromQuery
-    && room.inviteCode === inviteCodeFromQuery
-  );
-
-  res.json({ invited, roomCode: invited ? room.code : null });
 });
 
 const WORLD_WIDTH = 960;
@@ -45,10 +27,12 @@ const BOT_PREFIX = "bot-";
 const INVITE_CODE_LENGTH = 8;
 const SIMULATION_FPS = 60;
 const BROADCAST_FPS = 20;
+const MIN_TARGET_SCORE = 3;
+const MAX_TARGET_SCORE = 99;
+const DEFAULT_TARGET_SCORE = 15;
 
 const rooms = {};
 const socketToRoom = {};
-// 2. Track users who temporarily disconnected to give them a grace period
 const disconnectionTimeouts = new Map();
 
 function roomCode() {
@@ -69,26 +53,33 @@ function createLoveItem(seed = 0) {
     id: `${Date.now()}-${Math.random()}-${seed}`,
     x: Math.random() * (WORLD_WIDTH - 24) + 12,
     y: Math.random() * (WORLD_HEIGHT - 24) + 12,
-    type: Math.floor(Math.random() * 4)
+    type: Math.floor(Math.random() * 4),
   };
 }
 
-function createRoom(mode = "duo") {
+function normalizeTargetScore(input) {
+  const n = Number.parseInt(input, 10);
+  if (Number.isNaN(n)) return DEFAULT_TARGET_SCORE;
+  return Math.min(MAX_TARGET_SCORE, Math.max(MIN_TARGET_SCORE, n));
+}
+
+function createRoom({ mode = "duo", maxScore = DEFAULT_TARGET_SCORE } = {}) {
   let code = roomCode();
-  while (rooms[code]) {
-    code = roomCode();
-  }
+  while (rooms[code]) code = roomCode();
 
   const loveItems = Array.from({ length: ITEM_COUNT }, (_, index) => createLoveItem(index));
   rooms[code] = {
     code,
     inviteCode: inviteCode(),
     mode,
+    maxScore: normalizeTargetScore(maxScore),
+    winnerId: null,
+    isGameOver: false,
     players: {},
     scores: {},
     names: {},
     loveItems,
-    letter: `My love, join me in Love Rush Arena. Our secret code is ${code}. 💌`
+    letter: `My love, join me in Love Rush Arena. Our secret code is ${code}. 💌`,
   };
   return rooms[code];
 }
@@ -97,7 +88,7 @@ function addPlayerToRoom(room, socketId, loverName) {
   room.players[socketId] = {
     x: Math.random() * (WORLD_WIDTH - 100) + 50,
     y: Math.random() * (WORLD_HEIGHT - 100) + 50,
-    color: `hsl(${Math.floor(Math.random() * 360)}, 95%, 60%)`
+    color: `hsl(${Math.floor(Math.random() * 360)}, 95%, 60%)`,
   };
   room.scores[socketId] = room.scores[socketId] || 0;
   room.names[socketId] = loverName || "Lover";
@@ -120,7 +111,11 @@ function emitRoomState(room, event = "gameUpdate", { volatile = false } = {}) {
     loveItems: room.loveItems,
     scores: room.scores,
     names: room.names,
-    mode: room.mode
+    mode: room.mode,
+    maxScore: room.maxScore,
+    isGameOver: room.isGameOver,
+    winnerId: room.winnerId,
+    winnerName: room.winnerId ? room.names[room.winnerId] || "Lover" : null,
   });
 }
 
@@ -132,6 +127,22 @@ function cleanupRoom(code) {
   if (liveHumanPlayers.length === 0) {
     delete rooms[code];
   }
+}
+
+function finishGame(room, winnerId) {
+  if (!room || room.isGameOver) return;
+  room.isGameOver = true;
+  room.winnerId = winnerId;
+
+  io.to(room.code).emit("gameOver", {
+    roomCode: room.code,
+    winnerId,
+    winnerName: room.names[winnerId] || "Lover",
+    winningScore: room.scores[winnerId] || 0,
+    maxScore: room.maxScore,
+  });
+
+  emitRoomState(room, "gameUpdate");
 }
 
 function botStep(room) {
@@ -156,7 +167,10 @@ function botStep(room) {
 }
 
 function runCollisions(room) {
-  Object.keys(room.players).forEach((id) => {
+  if (!room || room.isGameOver) return;
+
+  const ids = Object.keys(room.players);
+  for (const id of ids) {
     const player = room.players[id];
     for (let i = room.loveItems.length - 1; i >= 0; i -= 1) {
       const item = room.loveItems[i];
@@ -164,25 +178,33 @@ function runCollisions(room) {
         room.scores[id] = (room.scores[id] || 0) + 1;
         room.loveItems.splice(i, 1);
         room.loveItems.push(createLoveItem(i));
+
+        if (room.scores[id] >= room.maxScore) {
+          finishGame(room, id);
+          return;
+        }
       }
     }
-  });
+  }
 }
 
-io.on("connection", (socket) => {
-  // 3. Check if this is a seamless reconnect recovered by Socket.IO
-  if (socket.recovered) {
-    if (disconnectionTimeouts.has(socket.id)) {
-      clearTimeout(disconnectionTimeouts.get(socket.id));
-      disconnectionTimeouts.delete(socket.id);
-    }
-    return; // Stop here! Their state and rooms are fully restored.
-  }
+app.get("/api/invitation", (req, res) => {
+  const roomCodeFromQuery = String(req.query.roomCode || "").toUpperCase().trim();
+  const inviteCodeFromQuery = String(req.query.inviteCode || "").toUpperCase().trim();
+  const room = rooms[roomCodeFromQuery];
 
+  const invited = Boolean(
+    room && room.inviteCode && inviteCodeFromQuery && room.inviteCode === inviteCodeFromQuery,
+  );
+
+  res.json({ invited, roomCode: invited ? room.code : null });
+});
+
+io.on("connection", (socket) => {
   socket.emit("ready", { message: "Connected to Love Rush" });
 
-  socket.on("createRoom", ({ loverName, withBot }) => {
-    const room = createRoom(withBot ? "bot-duo" : "duo");
+  socket.on("createRoom", ({ loverName, withBot, maxScore }) => {
+    const room = createRoom({ mode: withBot ? "bot-duo" : "duo", maxScore });
     addPlayerToRoom(room, socket.id, loverName);
     if (withBot) ensureBot(room);
 
@@ -198,7 +220,10 @@ io.on("connection", (socket) => {
       names: room.names,
       mode: room.mode,
       letter: room.letter,
-      inviteCode: room.inviteCode
+      inviteCode: room.inviteCode,
+      maxScore: room.maxScore,
+      isGameOver: room.isGameOver,
+      winnerId: room.winnerId,
     });
 
     emitRoomState(room, "gameUpdate");
@@ -232,7 +257,10 @@ io.on("connection", (socket) => {
       names: room.names,
       mode: room.mode,
       letter: room.letter,
-      inviteCode: room.inviteCode
+      inviteCode: room.inviteCode,
+      maxScore: room.maxScore,
+      isGameOver: room.isGameOver,
+      winnerId: room.winnerId,
     });
 
     emitRoomState(room, "gameUpdate");
@@ -242,6 +270,7 @@ io.on("connection", (socket) => {
     const code = socketToRoom[socket.id];
     if (!code || !rooms[code] || !rooms[code].players[socket.id]) return;
     const room = rooms[code];
+    if (room.isGameOver) return;
 
     room.players[socket.id].x = Math.max(15, Math.min(WORLD_WIDTH - 15, x));
     room.players[socket.id].y = Math.max(15, Math.min(WORLD_HEIGHT - 15, y));
@@ -251,7 +280,6 @@ io.on("connection", (socket) => {
     const code = socketToRoom[socket.id];
     if (!code || !rooms[code]) return;
 
-    // 4. Wait 10 seconds before deleting the player, allowing them time to reconnect
     const timeoutId = setTimeout(() => {
       const room = rooms[code];
       if (!room) return;
@@ -264,7 +292,7 @@ io.on("connection", (socket) => {
       emitRoomState(room, "gameUpdate");
       cleanupRoom(code);
       disconnectionTimeouts.delete(socket.id);
-    }, 10000); // 10 seconds
+    }, 10000);
 
     disconnectionTimeouts.set(socket.id, timeoutId);
   });
@@ -272,6 +300,7 @@ io.on("connection", (socket) => {
 
 const simulationLoop = setInterval(() => {
   Object.values(rooms).forEach((room) => {
+    if (room.isGameOver) return;
     if (room.mode === "bot-duo") botStep(room);
     runCollisions(room);
   });

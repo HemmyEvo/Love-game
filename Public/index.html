@@ -22,6 +22,7 @@
     <section id="lobby" class="card lobby">
       <h2>Start a match</h2>
       <input id="loverName" type="text" maxlength="20" placeholder="Your name" />
+      <input id="maxScoreInput" type="number" min="3" max="99" value="15" placeholder="Target score (3-99)" />
       <div class="actions">
         <button id="createRoomBtn">Create Duo Room</button>
         <button id="createBotBtn">Play vs Cupid Bot</button>
@@ -44,6 +45,7 @@
     <section class="bottom-grid">
       <section class="card score-panel">
         <h3>Live Scoreboard</h3>
+        <p id="targetScoreLabel" class="target-score">First to 15</p>
         <div id="scores"></div>
       </section>
 
