@@ -7,6 +7,7 @@ const touchPad = document.getElementById("touchPad");
 const lobby = document.getElementById("lobby");
 const joinError = document.getElementById("joinError");
 const loveLetter = document.getElementById("loveLetter");
+const gyroBtn = document.getElementById("gyroBtn");
 
 const createRoomBtn = document.getElementById("createRoomBtn");
 const createBotBtn = document.getElementById("createBotBtn");
@@ -26,6 +27,9 @@ let loveItems = [];
 let scores = {};
 let names = {};
 let connected = false;
+
+let gyroEnabled = false;
+let gyroAxes = { x: 0, y: 0 };
 
 const socket = io({ transports: ["websocket", "polling"], reconnectionAttempts: 4 });
 
@@ -55,7 +59,7 @@ function showLoveLetter(letter, code) {
 
 socket.on("connect", () => {
   connected = true;
-  setStatus("Connected • pick a mode", "online");
+  setStatus("Connected • pick mode", "online");
 });
 
 socket.on("connect_error", () => {
@@ -76,9 +80,7 @@ socket.on("init", (data) => {
   updateScoreboard();
   joinError.textContent = "";
 
-  if (data.letter) {
-    showLoveLetter(data.letter, data.roomCode);
-  }
+  if (data.letter) showLoveLetter(data.letter, data.roomCode);
 
   lobby.classList.add("compact");
   setStatus(data.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
@@ -121,9 +123,6 @@ function updateScoreboard() {
       <span>${index + 1}. ${isYou ? "You" : names[id] || "Lover"}</span>
       <strong>${score}</strong>
     `;
-    if (isYou) {
-      row.style.borderColor = players[id]?.color || "#fff";
-    }
     scoresElement.appendChild(row);
   });
 }
@@ -180,18 +179,65 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+function handleDeviceOrientation(event) {
+  const tiltLeftRight = event.gamma || 0;
+  const tiltFrontBack = event.beta || 0;
+
+  if (window.matchMedia("(orientation: portrait)").matches) {
+    gyroAxes.x = clamp(tiltLeftRight / 25, -1, 1);
+    gyroAxes.y = clamp(tiltFrontBack / 35, -1, 1);
+  } else {
+    gyroAxes.x = clamp(tiltFrontBack / 35, -1, 1);
+    gyroAxes.y = clamp(-tiltLeftRight / 25, -1, 1);
+  }
+}
+
+async function enableGyroscope() {
+  if (!("DeviceOrientationEvent" in window)) {
+    gyroBtn.textContent = "Gyroscope not supported";
+    return;
+  }
+
+  try {
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      const result = await DeviceOrientationEvent.requestPermission();
+      if (result !== "granted") {
+        gyroBtn.textContent = "Gyroscope blocked";
+        return;
+      }
+    }
+
+    window.addEventListener("deviceorientation", handleDeviceOrientation);
+    gyroEnabled = true;
+    gyroBtn.textContent = "Gyroscope Enabled";
+  } catch (_error) {
+    gyroBtn.textContent = "Gyroscope unavailable";
+  }
+}
+
+gyroBtn.addEventListener("click", enableGyroscope);
+
 function moveSelf() {
   if (!playerId || !players[playerId]) return;
+
   const me = players[playerId];
   const speed = 4.8;
+  let vx = 0;
+  let vy = 0;
 
-  if (keys.has("left")) me.x -= speed;
-  if (keys.has("right")) me.x += speed;
-  if (keys.has("up")) me.y -= speed;
-  if (keys.has("down")) me.y += speed;
+  if (keys.has("left")) vx -= 1;
+  if (keys.has("right")) vx += 1;
+  if (keys.has("up")) vy -= 1;
+  if (keys.has("down")) vy += 1;
 
-  me.x = clamp(me.x, 15, WORLD_WIDTH - 15);
-  me.y = clamp(me.y, 15, WORLD_HEIGHT - 15);
+  if (gyroEnabled) {
+    vx += gyroAxes.x;
+    vy += gyroAxes.y;
+  }
+
+  me.x = clamp(me.x + vx * speed, 15, WORLD_WIDTH - 15);
+  me.y = clamp(me.y + vy * speed, 15, WORLD_HEIGHT - 15);
+
   socket.emit("move", { x: me.x, y: me.y });
 }
 
@@ -214,7 +260,7 @@ function drawHeart(x, y, size, color, glow = 0.9) {
 }
 
 function loveColor(type) {
-  return ["#ff4fa8", "#ff79c8", "#ffd0ec", "#9d7aff"][type] || "#ff4fa8";
+  return ["#ff2d55", "#ffffff", "#d6d6d6", "#ff6f8f"][type] || "#ff2d55";
 }
 
 function resizeCanvas() {
@@ -229,8 +275,8 @@ resizeCanvas();
 
 function drawBackground() {
   const gradient = ctx.createLinearGradient(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-  gradient.addColorStop(0, "#241033");
-  gradient.addColorStop(1, "#32184b");
+  gradient.addColorStop(0, "#090909");
+  gradient.addColorStop(1, "#151515");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 }
@@ -253,7 +299,7 @@ function draw() {
   if (!playerId) {
     ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.font = "700 20px Inter, Arial";
-    ctx.fillText("Create or join a love room to start", 260, 300);
+    ctx.fillText("Create or join a love room to start", 250, 300);
   }
 }
 
