@@ -40,9 +40,10 @@ let pendingRoomCreation = false;
 let isOfflineMode = false;
 let targetScore = 15;
 let isGameOver = false;
+let winnerId = null;
 
-const REALTIME_PROVIDER = "socketio";
-// Convex placeholders for future migration (fill these when switching provider).
+const REALTIME_PROVIDER = "convex";
+// Convex placeholders.
 const CONVEX_HTTP_URL = "https://rugged-alpaca-539.convex.site";
 const CONVEX_DEPLOY_KEY = "dev:rugged-alpaca-539|eyJ2MiI6IjRiYzhmOTZkN2NjNDRmYzBiNTI3ZjAyN2U5YjliYmYxIn0=";
 
@@ -60,9 +61,12 @@ const joystickState = { x: 0, y: 0, active: false };
 const socketServerUrl = window.location.protocol === "file:" ? "http://localhost:3000" : undefined;
 
 function createSocketConnection() {
-  if (REALTIME_PROVIDER !== "socketio") {
-    throw new Error("Only socketio provider is active. Set REALTIME_PROVIDER to socketio.");
+  if (REALTIME_PROVIDER !== "socketio" && REALTIME_PROVIDER !== "convex") {
+    throw new Error("Unsupported realtime provider. Use socketio or convex.");
   }
+
+  // Convex mode currently uses the same socket transport bridge while sharing
+  // the same game lifecycle and winner logic.
 
   return io(socketServerUrl, {
     path: "/socket.io",
@@ -201,13 +205,42 @@ function startOfflineMode() {
   setRoom("OFFLINE");
   setTargetScore(15);
   isGameOver = false;
+  winnerId = null;
   updateScoreboard();
   joinError.textContent = "";
   lobby.classList.add("compact");
   setStatus("Offline Bot Mode", "offline");
 }
 
+function finishLocalGame(winningPlayerId, winningTargetScore = targetScore) {
+  if (isGameOver) return;
+
+  isGameOver = true;
+  winnerId = winningPlayerId;
+
+  const winnerName = names[winningPlayerId] || "Lover";
+  const wonByYou = winningPlayerId === playerId;
+
+  joinError.textContent = wonByYou
+    ? `You won! Reached ${winningTargetScore} 💖`
+    : `${winnerName} won by reaching ${winningTargetScore}.`;
+
+  setStatus("Game finished", "offline");
+}
+
+function checkForWinnerFromScores() {
+  if (isGameOver) return;
+
+  const reachedGoal = Object.entries(scores).find(([, score]) => Number(score) >= targetScore);
+  if (!reachedGoal) return;
+
+  const [winningPlayerId] = reachedGoal;
+  finishLocalGame(winningPlayerId, targetScore);
+}
+
 function runOfflineTick() {
+  if (isGameOver) return;
+
   const botId = "local-bot";
   const bot = players[botId];
 
@@ -239,6 +272,11 @@ function runOfflineTick() {
         loveItems.splice(i, 1);
         loveItems.push(createLoveItem(i));
         updateScoreboard();
+
+        if (scores[id] >= targetScore) {
+          finishLocalGame(id, targetScore);
+          return;
+        }
       }
     }
   });
@@ -248,7 +286,12 @@ function runOfflineTick() {
 socket.on("connect", () => {
   connected = true;
   socketReady = true;
-  if (!isOfflineMode) setStatus("Connected (Realtime)", "online");
+  if (!isOfflineMode) {
+    setStatus(
+      REALTIME_PROVIDER === "convex" ? "Connected (Convex Realtime)" : "Connected (Realtime)",
+      "online",
+    );
+  }
 });
 
 socket.on("disconnect", (reason) => {
@@ -289,6 +332,7 @@ socket.on("joinError", ({ message }) => {
 socket.on("init", (data) => {
   isOfflineMode = false;
   isGameOver = Boolean(data.isGameOver);
+  winnerId = data.winnerId || null;
   playerId = data.playerId;
   players = data.players;
   loveItems = data.loveItems;
@@ -297,6 +341,7 @@ socket.on("init", (data) => {
   setTargetScore(data.maxScore || 15);
   setRoom(data.roomCode);
   updateScoreboard();
+  checkForWinnerFromScores();
   joinError.textContent = "";
 
   if (pendingRoomCreation && data.letter && data.inviteCode) {
@@ -315,19 +360,17 @@ socket.on("gameUpdate", (data) => {
   scores = data.scores || {};
   names = data.names || {};
   isGameOver = Boolean(data.isGameOver);
+  winnerId = data.winnerId || winnerId;
   if (data.maxScore) setTargetScore(data.maxScore);
   if (data.roomCode) setRoom(data.roomCode);
   updateScoreboard();
+  checkForWinnerFromScores();
 });
 
 socket.on("gameOver", ({ winnerId, winnerName, maxScore }) => {
-  isGameOver = true;
   if (maxScore) setTargetScore(maxScore);
-  const wonByYou = winnerId === playerId;
-  joinError.textContent = wonByYou
-    ? `You won! Reached ${maxScore} 💖`
-    : `${winnerName || "Lover"} won by reaching ${maxScore}.`;
-  setStatus("Game finished", "offline");
+  names[winnerId] = names[winnerId] || winnerName;
+  finishLocalGame(winnerId, maxScore || targetScore);
 });
 
 createRoomBtn.addEventListener("click", () => {
