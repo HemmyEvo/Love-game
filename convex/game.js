@@ -199,10 +199,6 @@ export const joinRoom = mutation({
     const readyPlayers = { ...(room.readyPlayers || {}) };
 
     if (!players[playerId]) {
-      const humans = Object.keys(players).filter((id) => id !== BOT_ID);
-      if (humans.length >= 2 && room.mode !== "bot-duo") {
-        throw new Error("This room is full");
-      }
       players[playerId] = createPlayer();
       scores[playerId] = scores[playerId] || 0;
       votes[playerId] = votes[playerId] || room.maxScore || 15;
@@ -257,6 +253,11 @@ export const move = mutation({
       x: clamp(args.x, 15, WORLD_WIDTH - 15),
       y: clamp(args.y, 15, WORLD_HEIGHT - 15),
     };
+
+    const current = room.players?.[args.playerId];
+    if (current && current.x === players[args.playerId].x && current.y === players[args.playerId].y) {
+      return roomResponse(room, args.playerId);
+    }
 
     const next = collectLove({ ...room, players });
 
