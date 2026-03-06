@@ -333,3 +333,48 @@ export const setMatchPreferences = mutation({
     return roomResponse(updated, args.playerId);
   },
 });
+
+
+export const leaveRoom = mutation({
+  args: {
+    roomCode: v.string(),
+    playerId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const room = await findRoomByCode(ctx, args.roomCode.trim().toUpperCase());
+    if (!room) return { deleted: false, left: false };
+
+    const players = { ...(room.players || {}) };
+    const scores = { ...(room.scores || {}) };
+    const names = { ...(room.names || {}) };
+    const maxScoreVotes = { ...(room.maxScoreVotes || {}) };
+    const readyPlayers = { ...(room.readyPlayers || {}) };
+
+    delete players[args.playerId];
+    delete scores[args.playerId];
+    delete names[args.playerId];
+    delete maxScoreVotes[args.playerId];
+    delete readyPlayers[args.playerId];
+
+    const humanIds = Object.keys(players).filter((id) => id !== BOT_ID);
+    if (humanIds.length === 0) {
+      await ctx.db.delete(room._id);
+      return { deleted: true, left: true };
+    }
+
+    const allReady = humanIds.every((id) => Boolean(readyPlayers[id]));
+    const sameVote = humanIds.every((id) => maxScoreVotes[id] === maxScoreVotes[humanIds[0]]);
+
+    await ctx.db.patch(room._id, {
+      players,
+      scores,
+      names,
+      maxScoreVotes,
+      readyPlayers,
+      gameStarted: room.mode === "bot-duo" ? true : (allReady && sameVote),
+      maxScore: sameVote ? maxScoreVotes[humanIds[0]] : room.maxScore,
+    });
+
+    return { deleted: false, left: true };
+  },
+});

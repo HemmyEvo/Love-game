@@ -60,6 +60,7 @@ const CONVEX_FUNCTIONS = {
   getRoomState: "game:getRoomState",
   validateInvitation: "game:validateInvitation",
   setMatchPreferences: "game:setMatchPreferences",
+  leaveRoom: "game:leaveRoom",
 };
 
 const REQUIRED_CONVEX_FUNCTION_PATHS = [
@@ -69,6 +70,7 @@ const REQUIRED_CONVEX_FUNCTION_PATHS = [
   "game:getRoomState",
   "game:validateInvitation",
   "game:setMatchPreferences",
+  "game:leaveRoom",
 ];
 const configuredConvexFunctionPaths = new Set(Object.values(CONVEX_FUNCTIONS));
 const missingRequiredConvexFunctions = REQUIRED_CONVEX_FUNCTION_PATHS.filter(
@@ -264,6 +266,16 @@ async function syncMatchPreferences(ready) {
   applyRoomState(data);
 }
 
+
+async function leaveCurrentRoom() {
+  if (!roomCode || !playerId || isOfflineMode) return;
+  try {
+    await convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId });
+  } catch (_error) {
+    // best effort cleanup
+  }
+}
+
 function applyRoomState(data = {}) {
   const wasGameOver = isGameOver;
   isOfflineMode = false;
@@ -425,6 +437,7 @@ createRoomBtn.addEventListener("click", async () => {
     return;
   }
 
+  await leaveCurrentRoom();
   pendingRoomCreation = true;
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.createRoom, {
@@ -454,36 +467,11 @@ createRoomBtn.addEventListener("click", async () => {
 });
 
 createBotBtn.addEventListener("click", async () => {
-  if (!connected) {
-    startOfflineMode();
-    return;
-  }
-
-  pendingRoomCreation = true;
-  try {
-    const data = await convexCall("mutation", CONVEX_FUNCTIONS.createRoom, {
-      loverName: getLoverName(),
-      withBot: true,
-      maxScore: getTargetScore(),
-      deviceId: localDeviceId,
-    });
-
-    hasShownResultModal = false;
-    resultModal.classList.add("hidden");
-    resultModal.setAttribute("aria-hidden", "true");
-    applyRoomState(data);
-    if (pendingRoomCreation && data?.letter && data?.inviteCode) {
-      renderInvite(data.letter, data.roomCode, data.inviteCode);
-    }
-    pendingRoomCreation = false;
-    joinError.textContent = "";
-    lobby.classList.add("compact");
-    setStatus("Bot Duo Mode", "online");
-    startPolling();
-  } catch (_error) {
-    pendingRoomCreation = false;
-    startOfflineMode();
-  }
+  await leaveCurrentRoom();
+  hasShownResultModal = false;
+  resultModal.classList.add("hidden");
+  resultModal.setAttribute("aria-hidden", "true");
+  startOfflineMode();
 });
 
 joinRoomBtn.addEventListener("click", async () => {
@@ -492,6 +480,7 @@ joinRoomBtn.addEventListener("click", async () => {
     return;
   }
 
+  await leaveCurrentRoom();
   pendingRoomCreation = false;
   const code = roomCodeInput.value.toUpperCase().trim();
 
@@ -744,6 +733,7 @@ async function maybeShowInvitationOverlay() {
     openInviteOverlay(data.roomCode);
 
     if (!connected) return;
+    await leaveCurrentRoom();
     const joined = await convexCall("mutation", CONVEX_FUNCTIONS.joinRoom, {
       loverName: getLoverName(),
       roomCode: data.roomCode,
@@ -779,6 +769,10 @@ useIncomingCodeBtn.addEventListener("click", () => {
 
 inviteOverlay.addEventListener("click", (event) => {
   if (event.target === inviteOverlay) closeInviteOverlay();
+});
+
+window.addEventListener("pagehide", () => {
+  void leaveCurrentRoom();
 });
 
 closeResultBtn.addEventListener("click", () => {
