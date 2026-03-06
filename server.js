@@ -1,111 +1,111 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: "*"
+  }
+});
+
 app.use(express.static("Public"));
-// Socket.io connection handling
+
+const WORLD_WIDTH = 960;
+const WORLD_HEIGHT = 600;
+const ITEM_COUNT = 20;
+
 const players = {};
 const loveItems = [];
 const scores = {};
 
+function createLoveItem(seed = 0) {
+  return {
+    id: `${Date.now()}-${Math.random()}-${seed}`,
+    x: Math.random() * (WORLD_WIDTH - 24) + 12,
+    y: Math.random() * (WORLD_HEIGHT - 24) + 12,
+    type: Math.floor(Math.random() * 4)
+  };
+}
+
 function generateLoveItems() {
-  for (let i = 0; i < 20; i++) {
-    loveItems.push({
-      id: Date.now() + i, // More unique IDs
-      x: Math.random() * 780,
-      y: Math.random() * 580,
-      type: Math.floor(Math.random() * 3)
-    });
+  while (loveItems.length < ITEM_COUNT) {
+    loveItems.push(createLoveItem(loveItems.length));
   }
 }
 
 function checkCollisions() {
-  Object.keys(players).forEach(playerId => {
+  Object.keys(players).forEach((playerId) => {
     const player = players[playerId];
-    loveItems.forEach((item, index) => {
-      if (
-        player.x < item.x + 20 &&
-        player.x + 50 > item.x &&
-        player.y < item.y + 20 &&
-        player.y + 50 > item.y
-      ) {
+
+    for (let index = loveItems.length - 1; index >= 0; index -= 1) {
+      const item = loveItems[index];
+      const hit = Math.hypot(player.x - item.x, player.y - item.y) < 30;
+
+      if (hit) {
         scores[playerId] = (scores[playerId] || 0) + 1;
         loveItems.splice(index, 1);
-        loveItems.push({
-          id: Date.now(),
-          x: Math.random() * 780,
-          y: Math.random() * 580,
-          type: Math.floor(Math.random() * 3)
-        });
-        io.emit('scoreUpdate', { playerId, score: scores[playerId] });
+        loveItems.push(createLoveItem(index));
+        io.emit("scoreUpdate", { playerId, score: scores[playerId] });
       }
-    });
+    }
   });
 }
 
-io.on('connection', (socket) => {
-  console.log('New connection:', socket.id);
-
-  // Initialize player
+io.on("connection", (socket) => {
   players[socket.id] = {
-    x: Math.random() * 750,
-    y: Math.random() * 550,
-    color: `hsl(${Math.random() * 360}, 100%, 50%)`
+    x: Math.random() * (WORLD_WIDTH - 100) + 50,
+    y: Math.random() * (WORLD_HEIGHT - 100) + 50,
+    color: `hsl(${Math.floor(Math.random() * 360)}, 95%, 60%)`
   };
   scores[socket.id] = 0;
 
-  // Send initial state
-  socket.emit('init', { 
+  socket.emit("init", {
     playerId: socket.id,
     players,
     loveItems,
     scores
   });
 
-  // Notify others
-  socket.broadcast.emit('newPlayer', {
+  socket.broadcast.emit("newPlayer", {
     playerId: socket.id,
     player: players[socket.id]
   });
 
-  // Movement handler
-  socket.on('move', (data) => {
-    if (players[socket.id]) {
-      players[socket.id] = { ...players[socket.id], ...data };
-      socket.broadcast.emit('playerMoved', {
-        playerId: socket.id,
-        ...data
-      });
-    }
+  socket.on("move", ({ x, y }) => {
+    if (!players[socket.id]) return;
+
+    players[socket.id].x = Math.max(15, Math.min(WORLD_WIDTH - 15, x));
+    players[socket.id].y = Math.max(15, Math.min(WORLD_HEIGHT - 15, y));
+
+    socket.broadcast.emit("playerMoved", {
+      playerId: socket.id,
+      x: players[socket.id].x,
+      y: players[socket.id].y
+    });
   });
 
-  // Disconnection handler
-  socket.on('disconnect', () => {
-    console.log('Disconnected:', socket.id);
+  socket.on("disconnect", () => {
     delete players[socket.id];
     delete scores[socket.id];
-    io.emit('playerDisconnected', socket.id);
+    io.emit("playerDisconnected", socket.id);
   });
 });
 
-// Game loop
+generateLoveItems();
+
 const gameLoop = setInterval(() => {
   checkCollisions();
-  io.emit('gameUpdate', { players, loveItems });
+  io.emit("gameUpdate", { players, loveItems });
 }, 1000 / 60);
 
-// Server startup
-generateLoveItems();
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// Cleanup on exit
-process.on('SIGTERM', () => {
+process.on("SIGTERM", () => {
   clearInterval(gameLoop);
   server.close();
 });
