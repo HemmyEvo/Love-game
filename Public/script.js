@@ -31,6 +31,8 @@ const resultModal = document.getElementById("resultModal");
 const resultTitle = document.getElementById("resultTitle");
 const resultBody = document.getElementById("resultBody");
 const closeResultBtn = document.getElementById("closeResultBtn");
+const playAgainBtn = document.getElementById("playAgainBtn");
+const leaveRoomBtn = document.getElementById("leaveRoomBtn");
 const matchSetupModal = document.getElementById("matchSetupModal");
 const setupModalText = document.getElementById("setupModalText");
 const setupMaxScoreInput = document.getElementById("setupMaxScoreInput");
@@ -45,6 +47,7 @@ canvas.height = WORLD_HEIGHT;
 let playerId = null;
 let roomCode = null;
 let players = {};
+let renderPlayers = {};
 let loveItems = [];
 let scores = {};
 let names = {};
@@ -66,6 +69,7 @@ const CONVEX_FUNCTIONS = {
   getRoomState: "game:getRoomState",
   validateInvitation: "game:validateInvitation",
   setMatchPreferences: "game:setMatchPreferences",
+  playAgain: "game:playAgain",
   leaveRoom: "game:leaveRoom",
 };
 
@@ -76,6 +80,7 @@ const REQUIRED_CONVEX_FUNCTION_PATHS = [
   "game:getRoomState",
   "game:validateInvitation",
   "game:setMatchPreferences",
+  "game:playAgain",
   "game:leaveRoom",
 ];
 const configuredConvexFunctionPaths = new Set(Object.values(CONVEX_FUNCTIONS));
@@ -278,7 +283,7 @@ function renderPregameInfo(data = {}) {
     pregameStatus.textContent = "Before the match starts, both lovers must pick the same max score and tap Ready.";
     readyBtn.textContent = `Ready with ${myVote}`;
     readyBtn.disabled = false;
-    openSetupBtn.disabled = humanIds.length < 2 || data.mode === "bot-duo";
+    openSetupBtn.disabled = data.mode === "bot-duo";
   }
 
   if (partnerId) {
@@ -318,7 +323,16 @@ function applyRoomState(data = {}) {
   isGameOver = Boolean(data.isGameOver);
   winnerId = data.winnerId || null;
   playerId = data.playerId || playerId;
-  players = data.players || {};
+  const nextPlayers = data.players || {};
+  if (playerId && players[playerId] && nextPlayers[playerId] && !isGameOver) {
+    nextPlayers[playerId] = {
+      ...nextPlayers[playerId],
+      x: players[playerId].x,
+      y: players[playerId].y,
+    };
+  }
+  players = nextPlayers;
+  renderPlayers = { ...renderPlayers, ...nextPlayers };
   loveItems = data.loveItems || [];
   scores = data.scores || {};
   names = data.names || {};
@@ -381,6 +395,8 @@ function startOfflineMode() {
     },
     [botId]: { x: 160, y: 140, color: "#92ccff" }
   };
+
+  renderPlayers = { ...players };
 
   names = {
     [playerId]: getLoverName(),
@@ -560,7 +576,6 @@ readyBtn.addEventListener("click", async () => {
 });
 
 openSetupBtn.addEventListener("click", () => {
-  if (openSetupBtn.disabled) return;
   openMatchSetupModal();
 });
 
@@ -703,7 +718,6 @@ async function sendMoveUpdate(x, y) {
 
 function moveSelf() {
   if (!playerId || !players[playerId] || isGameOver) return;
-  if (!isOfflineMode && pregamePanel && !readyBtn.disabled) return;
 
   const me = players[playerId];
   const speed = 4.7;
@@ -767,7 +781,7 @@ function draw() {
     drawHeart(item.x, item.y, 18, loveColor(item.type), 0.7);
   });
 
-  Object.entries(players).forEach(([id, player]) => {
+  Object.entries(renderPlayers).forEach(([id, player]) => {
     const mine = id === playerId;
     drawHeart(player.x, player.y, mine ? 36 : 31, player.color, mine ? 1 : 0.8);
     ctx.fillStyle = "rgba(255,255,255,0.92)";
@@ -799,6 +813,18 @@ function gameLoop() {
   if (isOfflineMode) {
     runOfflineTick();
   }
+
+  Object.keys(players).forEach((id) => {
+    const target = players[id];
+    if (!renderPlayers[id]) {
+      renderPlayers[id] = { ...target };
+      return;
+    }
+    const lerp = id === playerId ? 0.55 : 0.25;
+    renderPlayers[id].x += (target.x - renderPlayers[id].x) * lerp;
+    renderPlayers[id].y += (target.y - renderPlayers[id].y) * lerp;
+    renderPlayers[id].color = target.color;
+  });
 
   draw();
   requestAnimationFrame(gameLoop);
@@ -864,6 +890,45 @@ window.addEventListener("pagehide", () => {
 });
 
 closeResultBtn.addEventListener("click", () => {
+  resultModal.classList.add("hidden");
+  resultModal.setAttribute("aria-hidden", "true");
+});
+
+playAgainBtn.addEventListener("click", async () => {
+  if (isOfflineMode) {
+    startOfflineMode();
+    resultModal.classList.add("hidden");
+    resultModal.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  if (!roomCode || !playerId) return;
+  try {
+    const data = await convexCall("mutation", CONVEX_FUNCTIONS.playAgain, { roomCode, playerId });
+    hasShownResultModal = false;
+    resultModal.classList.add("hidden");
+    resultModal.setAttribute("aria-hidden", "true");
+    applyRoomState(data);
+  } catch (error) {
+    joinError.textContent = error?.message || "Could not restart match.";
+  }
+});
+
+leaveRoomBtn.addEventListener("click", async () => {
+  await leaveCurrentRoom();
+  roomCode = null;
+  playerId = null;
+  players = {};
+  renderPlayers = {};
+  scores = {};
+  names = {};
+  loveItems = [];
+  isGameOver = false;
+  winnerId = null;
+  hasShownResultModal = false;
+  setRoom(null);
+  updateScoreboard();
+  lobby.classList.remove("compact");
   resultModal.classList.add("hidden");
   resultModal.setAttribute("aria-hidden", "true");
 });

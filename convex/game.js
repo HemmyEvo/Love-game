@@ -94,6 +94,7 @@ function roomResponse(room, currentPlayerId = null) {
     readyPlayers: room.readyPlayers || {},
     promptScoreSetup: Boolean(room.promptScoreSetup),
     promptScoreSetupFor: room.promptScoreSetupFor || null,
+    playAgainVotes: room.playAgainVotes || {},
   };
 }
 
@@ -186,6 +187,7 @@ export const createRoom = mutation({
       gameStarted: mode === "bot-duo",
       promptScoreSetup: false,
       promptScoreSetupFor: null,
+      playAgainVotes: {},
       isGameOver: false,
       winnerId: null,
       players,
@@ -242,6 +244,12 @@ export const joinRoom = mutation({
     const names = { ...(room.names || {}) };
     const votes = { ...(room.maxScoreVotes || {}) };
     const readyPlayers = { ...(room.readyPlayers || {}) };
+
+    const humanIdsInRoom = Object.keys(players).filter((id) => id !== BOT_ID);
+    const isNewHumanJoin = !players[playerId] && playerId !== BOT_ID;
+    if (isNewHumanJoin && humanIdsInRoom.length >= 2) {
+      throw new Error("Room is full (max 2 players)");
+    }
 
     if (!players[playerId]) {
       const newPlayer = createPlayer();
@@ -434,6 +442,7 @@ export const setMatchPreferences = mutation({
       maxScore: selectedMax,
       promptScoreSetup: false,
       promptScoreSetupFor: null,
+      playAgainVotes: {},
     });
 
     const updated = await ctx.db.get(room._id);
@@ -441,6 +450,45 @@ export const setMatchPreferences = mutation({
   },
 });
 
+
+export const playAgain = mutation({
+  args: {
+    roomCode: v.string(),
+    playerId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const roomCode = args.roomCode.trim().toUpperCase();
+    const room = await findRoomByCode(ctx, roomCode);
+    if (!room) throw new Error("Room not found");
+    if (!(room.players || {})[args.playerId]) throw new Error("Player not in room");
+
+    const scores = { ...(room.scores || {}) };
+    Object.keys(scores).forEach((id) => {
+      scores[id] = 0;
+    });
+
+    const readyPlayers = { ...(room.readyPlayers || {}) };
+    Object.keys(readyPlayers).forEach((id) => {
+      readyPlayers[id] = room.mode === "bot-duo" && id === BOT_ID;
+    });
+
+    await ctx.db.patch(room._id, {
+      scores,
+      loveItems: Array.from({ length: INITIAL_LOVE_ITEMS }, (_, i) => createLoveItem(i)),
+      isGameOver: false,
+      winnerId: null,
+      gameStarted: room.mode === "bot-duo",
+      readyPlayers,
+      promptScoreSetup: room.mode !== "bot-duo",
+      promptScoreSetupFor: room.mode !== "bot-duo" ? args.playerId : null,
+      playAgainVotes: {},
+    });
+
+    const updated = await ctx.db.get(room._id);
+    const presence = await listRoomPresence(ctx, roomCode);
+    return roomResponse({ ...updated, players: mergePlayersWithPresence(updated, presence) }, args.playerId);
+  },
+});
 
 export const leaveRoom = mutation({
   args: {
@@ -457,12 +505,17 @@ export const leaveRoom = mutation({
     const names = { ...(room.names || {}) };
     const maxScoreVotes = { ...(room.maxScoreVotes || {}) };
     const readyPlayers = { ...(room.readyPlayers || {}) };
+    const playAgainVotes = { ...(room.playAgainVotes || {}) };
 
     delete players[args.playerId];
     delete scores[args.playerId];
     delete names[args.playerId];
     delete maxScoreVotes[args.playerId];
     delete readyPlayers[args.playerId];
+    delete playAgainVotes[args.playerId];
+
+    const presence = await getPresenceDoc(ctx, roomCode, args.playerId);
+    if (presence) await ctx.db.delete(presence._id);
 
     const presence = await getPresenceDoc(ctx, roomCode, args.playerId);
     if (presence) await ctx.db.delete(presence._id);
@@ -484,6 +537,7 @@ export const leaveRoom = mutation({
       names,
       maxScoreVotes,
       readyPlayers,
+      playAgainVotes,
       gameStarted: room.mode === "bot-duo" ? true : (allReady && sameVote),
       maxScore: sameVote ? maxScoreVotes[humanIds[0]] : room.maxScore,
       promptScoreSetup: false,
