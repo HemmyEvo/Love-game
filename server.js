@@ -5,10 +5,16 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
+
+// 1. Adjusted ping times and enabled Connection State Recovery
 const io = new Server(server, {
   cors: { origin: "*" },
-  pingInterval: 10000,
-  pingTimeout: 30000
+  pingInterval: 25000,
+  pingTimeout: 60000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
+    skipMiddlewares: true,
+  }
 });
 
 const publicDir = path.join(__dirname, "Public");
@@ -42,6 +48,8 @@ const BROADCAST_FPS = 20;
 
 const rooms = {};
 const socketToRoom = {};
+// 2. Track users who temporarily disconnected to give them a grace period
+const disconnectionTimeouts = new Map();
 
 function roomCode() {
   const alphabet = "LOVEXY";
@@ -162,6 +170,15 @@ function runCollisions(room) {
 }
 
 io.on("connection", (socket) => {
+  // 3. Check if this is a seamless reconnect recovered by Socket.IO
+  if (socket.recovered) {
+    if (disconnectionTimeouts.has(socket.id)) {
+      clearTimeout(disconnectionTimeouts.get(socket.id));
+      disconnectionTimeouts.delete(socket.id);
+    }
+    return; // Stop here! Their state and rooms are fully restored.
+  }
+
   socket.emit("ready", { message: "Connected to Love Rush" });
 
   socket.on("createRoom", ({ loverName, withBot }) => {
@@ -234,14 +251,22 @@ io.on("connection", (socket) => {
     const code = socketToRoom[socket.id];
     if (!code || !rooms[code]) return;
 
-    const room = rooms[code];
-    delete room.players[socket.id];
-    delete room.scores[socket.id];
-    delete room.names[socket.id];
-    delete socketToRoom[socket.id];
+    // 4. Wait 10 seconds before deleting the player, allowing them time to reconnect
+    const timeoutId = setTimeout(() => {
+      const room = rooms[code];
+      if (!room) return;
 
-    emitRoomState(room, "gameUpdate");
-    cleanupRoom(code);
+      delete room.players[socket.id];
+      delete room.scores[socket.id];
+      delete room.names[socket.id];
+      delete socketToRoom[socket.id];
+
+      emitRoomState(room, "gameUpdate");
+      cleanupRoom(code);
+      disconnectionTimeouts.delete(socket.id);
+    }, 10000); // 10 seconds
+
+    disconnectionTimeouts.set(socket.id, timeoutId);
   });
 });
 
