@@ -15,6 +15,8 @@ const createBotBtn = document.getElementById("createBotBtn");
 const joinRoomBtn = document.getElementById("joinRoomBtn");
 const loverNameInput = document.getElementById("loverName");
 const roomCodeInput = document.getElementById("roomCodeInput");
+const maxScoreInput = document.getElementById("maxScoreInput");
+const targetScoreLabel = document.getElementById("targetScoreLabel");
 
 const inviteOverlay = document.getElementById("inviteOverlay");
 const incomingCodeElement = document.getElementById("incomingCode");
@@ -35,7 +37,14 @@ let names = {};
 let connected = false;
 let socketReady = false;
 let pendingRoomCreation = false;
-let isOfflineMode = false; // New flag for offline play
+let isOfflineMode = false;
+let targetScore = 15;
+let isGameOver = false;
+
+const REALTIME_PROVIDER = "socketio";
+// Convex placeholders for future migration (fill these when switching provider).
+const CONVEX_HTTP_URL = "";
+const CONVEX_DEPLOY_KEY = "";
 
 const urlParams = new URLSearchParams(window.location.search);
 const invitedRoomCodeFromLink = (urlParams.get("room") || "")
@@ -48,16 +57,27 @@ const inviteTokenFromLink = (urlParams.get("invite") || "")
 
 const joystickState = { x: 0, y: 0, active: false };
 
-const socket = io(window.location.origin, {
-  path: "/socket.io",
-  transports: ["websocket", "polling"],
-  reconnection: true,
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 600,
-  reconnectionDelayMax: 4000,
-  timeout: 20000,
-  autoConnect: true
-});
+const socketServerUrl = window.location.protocol === "file:" ? "http://localhost:3000" : undefined;
+
+function createSocketConnection() {
+  if (REALTIME_PROVIDER !== "socketio") {
+    throw new Error("Only socketio provider is active. Set REALTIME_PROVIDER to socketio.");
+  }
+
+  return io(socketServerUrl, {
+    path: "/socket.io",
+    transports: ["websocket", "polling"],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 4000,
+    timeout: 20000,
+    autoConnect: true,
+    forceNew: true
+  });
+}
+
+const socket = createSocketConnection();
 
 function setStatus(text, state = "offline") {
   statusPill.textContent = text;
@@ -76,6 +96,17 @@ function setRoom(code) {
 function safeEmit(eventName, payload) {
   if (!socket.connected) return;
   socket.emit(eventName, payload);
+}
+
+function getTargetScore() {
+  const value = Number.parseInt(maxScoreInput.value, 10);
+  if (Number.isNaN(value)) return 15;
+  return clamp(value, 3, 99);
+}
+
+function setTargetScore(value) {
+  targetScore = clamp(Number(value) || 15, 3, 99);
+  targetScoreLabel.textContent = `First to ${targetScore}`;
 }
 
 function copyText(text) {
@@ -168,6 +199,8 @@ function startOfflineMode() {
   loveItems = Array.from({ length: 22 }, (_, i) => createLoveItem(i));
 
   setRoom("OFFLINE");
+  setTargetScore(15);
+  isGameOver = false;
   updateScoreboard();
   joinError.textContent = "";
   lobby.classList.add("compact");
@@ -215,7 +248,7 @@ function runOfflineTick() {
 socket.on("connect", () => {
   connected = true;
   socketReady = true;
-  if (!isOfflineMode) setStatus("Connected", "online");
+  if (!isOfflineMode) setStatus("Connected (Realtime)", "online");
 });
 
 socket.on("disconnect", (reason) => {
@@ -234,10 +267,19 @@ socket.io.on("reconnect", () => {
   if (!isOfflineMode) setStatus("Reconnected", "online");
 });
 
-socket.on("connect_error", () => {
+socket.on("connect_error", (error) => {
   connected = false;
   socketReady = false;
-  if (!isOfflineMode) setStatus("Connection failed", "offline");
+  if (!isOfflineMode) {
+    const hint = window.location.protocol === "file:"
+      ? " — run `npm start` and open http://localhost:3000"
+      : "";
+    const convexHint = (!CONVEX_HTTP_URL || !CONVEX_DEPLOY_KEY)
+      ? " (Convex keys not configured)"
+      : "";
+    setStatus(`Connection failed${hint}${convexHint}`, "offline");
+  }
+  console.error("Socket connection failed:", error?.message || error);
 });
 
 socket.on("joinError", ({ message }) => {
@@ -245,12 +287,14 @@ socket.on("joinError", ({ message }) => {
 });
 
 socket.on("init", (data) => {
-  isOfflineMode = false; // Reset offline flag if we join an online game
+  isOfflineMode = false;
+  isGameOver = Boolean(data.isGameOver);
   playerId = data.playerId;
   players = data.players;
   loveItems = data.loveItems;
   scores = data.scores;
   names = data.names;
+  setTargetScore(data.maxScore || 15);
   setRoom(data.roomCode);
   updateScoreboard();
   joinError.textContent = "";
@@ -265,13 +309,25 @@ socket.on("init", (data) => {
 });
 
 socket.on("gameUpdate", (data) => {
-  if (isOfflineMode) return; // Ignore server updates if playing offline
+  if (isOfflineMode) return;
   players = data.players || {};
   loveItems = data.loveItems || [];
   scores = data.scores || {};
   names = data.names || {};
+  isGameOver = Boolean(data.isGameOver);
+  if (data.maxScore) setTargetScore(data.maxScore);
   if (data.roomCode) setRoom(data.roomCode);
   updateScoreboard();
+});
+
+socket.on("gameOver", ({ winnerId, winnerName, maxScore }) => {
+  isGameOver = true;
+  if (maxScore) setTargetScore(maxScore);
+  const wonByYou = winnerId === playerId;
+  joinError.textContent = wonByYou
+    ? `You won! Reached ${maxScore} 💖`
+    : `${winnerName || "Lover"} won by reaching ${maxScore}.`;
+  setStatus("Game finished", "offline");
 });
 
 createRoomBtn.addEventListener("click", () => {
@@ -280,7 +336,7 @@ createRoomBtn.addEventListener("click", () => {
     return;
   }
   pendingRoomCreation = true;
-  safeEmit("createRoom", { loverName: getLoverName(), withBot: false });
+  safeEmit("createRoom", { loverName: getLoverName(), withBot: false, maxScore: getTargetScore() });
 });
 
 createBotBtn.addEventListener("click", () => {
@@ -289,7 +345,7 @@ createBotBtn.addEventListener("click", () => {
     return;
   }
   pendingRoomCreation = true;
-  safeEmit("createRoom", { loverName: getLoverName(), withBot: true });
+  safeEmit("createRoom", { loverName: getLoverName(), withBot: true, maxScore: getTargetScore() });
 });
 
 joinRoomBtn.addEventListener("click", () => {
@@ -302,6 +358,13 @@ joinRoomBtn.addEventListener("click", () => {
   safeEmit("joinRoom", { loverName: getLoverName(), roomCode: code });
 });
 
+
+maxScoreInput.addEventListener("change", () => {
+  maxScoreInput.value = String(getTargetScore());
+  setTargetScore(getTargetScore());
+});
+
+setTargetScore(getTargetScore());
 function updateScoreboard() {
   const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
   scoresElement.innerHTML = "";
@@ -395,7 +458,7 @@ joystick.addEventListener("pointermove", (event) => {
 });
 
 function moveSelf() {
-  if (!playerId || !players[playerId]) return;
+  if (!playerId || !players[playerId] || isGameOver) return;
 
   const me = players[playerId];
   const speed = 4.7;

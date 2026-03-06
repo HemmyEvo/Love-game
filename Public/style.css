@@ -113,6 +113,8 @@ canvas {
 .score-panel h3,
 .joystick-panel h3 { margin: 0 0 10px; font-size: 0.98rem; }
 
+.target-score { margin: 0 0 10px; color: var(--muted); font-size: 0.9rem; }
+
 #scores { display: grid; gap: 8px; }
 .score-row {
   display: flex;
