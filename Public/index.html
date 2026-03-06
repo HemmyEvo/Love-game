@@ -33,6 +33,13 @@
       </div>
       <p id="joinError" class="error"></p>
 
+      <div id="pregamePanel" class="pregame hidden">
+        <h3>💞 Match Setup</h3>
+        <p id="pregameStatus">Waiting for both lovers to choose the same max score and tap Ready.</p>
+        <div id="partnerChoice" class="partner-choice">Partner choice: —</div>
+        <button id="readyBtn">Ready with this max score</button>
+      </div>
+
       <div id="loveLetter" class="invite hidden"></div>
     </section>
 
@@ -71,6 +78,15 @@
           <button id="useIncomingCodeBtn">Use Code</button>
         </div>
       </div>
+    </div>
+  </div>
+
+
+  <div id="resultModal" class="result-modal hidden" aria-hidden="true">
+    <div class="result-card">
+      <h3 id="resultTitle">💘 Match Complete</h3>
+      <p id="resultBody"></p>
+      <button id="closeResultBtn">Aww ❤️</button>
     </div>
   </div>
 
