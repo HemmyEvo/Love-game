@@ -56,7 +56,6 @@ let isGameOver = false;
 let winnerId = null;
 let pollTimer = null;
 let hasShownResultModal = false;
-let hasShownSetupModal = false;
 
 const REALTIME_PROVIDER = "convex";
 const CONVEX_PROXY_URL = "/api/convex";
@@ -107,6 +106,7 @@ const inviteTokenFromLink = (urlParams.get("invite") || "")
   .trim();
 
 const joystickState = { x: 0, y: 0, active: false };
+const lastSentMove = { x: null, y: null, at: 0 };
 
 async function convexCall(kind, path, args = {}) {
   const response = await fetch(CONVEX_PROXY_URL, {
@@ -199,6 +199,16 @@ function closeMatchSetupModal() {
   matchSetupModal.setAttribute("aria-hidden", "true");
 }
 
+function maybeShowMatchSetupModal(data = {}) {
+  if (isOfflineMode || !roomCode || isGameOver || data.gameStarted) {
+    closeMatchSetupModal();
+    return;
+  }
+
+  const shouldPrompt = Boolean(data.promptScoreSetup) && data.promptScoreSetupFor === playerId;
+  if (shouldPrompt) openMatchSetupModal();
+}
+
 function renderInvite(letter, code, inviteCode) {
   if (!letter || !code || !inviteCode) return;
   const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(code)}&invite=${encodeURIComponent(inviteCode)}`;
@@ -268,7 +278,7 @@ function renderPregameInfo(data = {}) {
     pregameStatus.textContent = "Before the match starts, both lovers must pick the same max score and tap Ready.";
     readyBtn.textContent = `Ready with ${myVote}`;
     readyBtn.disabled = false;
-    openSetupBtn.disabled = humanIds.length < 2;
+    openSetupBtn.disabled = humanIds.length < 2 || data.mode === "bot-duo";
   }
 
   if (partnerId) {
@@ -316,6 +326,7 @@ function applyRoomState(data = {}) {
   setRoom(data.roomCode || roomCode);
   updateScoreboard();
   renderPregameInfo(data);
+  maybeShowMatchSetupModal(data);
   if (!wasGameOver && isGameOver) showResultModal();
   checkForWinnerFromScores();
 }
@@ -474,7 +485,6 @@ createRoomBtn.addEventListener("click", async () => {
     });
 
     hasShownResultModal = false;
-    hasShownSetupModal = false;
     resultModal.classList.add("hidden");
     resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(data);
@@ -496,7 +506,6 @@ createRoomBtn.addEventListener("click", async () => {
 createBotBtn.addEventListener("click", async () => {
   await leaveCurrentRoom();
   hasShownResultModal = false;
-  hasShownSetupModal = false;
   resultModal.classList.add("hidden");
   resultModal.setAttribute("aria-hidden", "true");
   startOfflineMode();
@@ -674,6 +683,17 @@ joystick.addEventListener("pointermove", (event) => {
 
 async function sendMoveUpdate(x, y) {
   if (!connected || isOfflineMode || !roomCode || !playerId || isGameOver) return;
+
+  const now = Date.now();
+  const movedEnough =
+    lastSentMove.x === null ||
+    Math.hypot(x - lastSentMove.x, y - lastSentMove.y) >= 2;
+  if (!movedEnough || now - lastSentMove.at < 60) return;
+
+  lastSentMove.x = x;
+  lastSentMove.y = y;
+  lastSentMove.at = now;
+
   try {
     await convexCall("mutation", CONVEX_FUNCTIONS.move, { roomCode, playerId, x, y });
   } catch (_error) {
@@ -810,7 +830,6 @@ async function maybeShowInvitationOverlay() {
     });
 
     hasShownResultModal = false;
-    hasShownSetupModal = false;
     resultModal.classList.add("hidden");
     resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(joined);
