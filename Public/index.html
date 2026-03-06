@@ -90,6 +90,18 @@
     </div>
   </div>
 
+  <div id="matchSetupModal" class="result-modal hidden" aria-hidden="true">
+    <div class="result-card setup-card">
+      <h3>🎯 Set Match Score</h3>
+      <p id="setupModalText">Pick the max score for this match before both players tap Ready.</p>
+      <input id="setupMaxScoreInput" type="number" min="3" max="99" value="15" />
+      <div class="setup-actions">
+        <button id="saveSetupBtn" type="button">Save Score</button>
+        <button id="readyFromSetupBtn" type="button">Save + Ready</button>
+      </div>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>

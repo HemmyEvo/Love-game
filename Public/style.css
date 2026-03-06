@@ -263,3 +263,22 @@ canvas {
   color: #ffeef5;
   border-color: #4f1f36;
 }
+
+.setup-card {
+  text-align: left;
+}
+
+.setup-card p {
+  color: #57253a;
+}
+
+.setup-card input {
+  background: #fff;
+  color: #34101f;
+  border-color: #d8a4b9;
+}
+
+.setup-actions {
+  display: grid;
+  gap: 8px;
+}
