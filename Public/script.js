@@ -30,6 +30,11 @@ const resultModal = document.getElementById("resultModal");
 const resultTitle = document.getElementById("resultTitle");
 const resultBody = document.getElementById("resultBody");
 const closeResultBtn = document.getElementById("closeResultBtn");
+const matchSetupModal = document.getElementById("matchSetupModal");
+const setupModalText = document.getElementById("setupModalText");
+const setupMaxScoreInput = document.getElementById("setupMaxScoreInput");
+const saveSetupBtn = document.getElementById("saveSetupBtn");
+const readyFromSetupBtn = document.getElementById("readyFromSetupBtn");
 
 const WORLD_WIDTH = 960;
 const WORLD_HEIGHT = 600;
@@ -50,6 +55,7 @@ let isGameOver = false;
 let winnerId = null;
 let pollTimer = null;
 let hasShownResultModal = false;
+let hasShownSetupModal = false;
 
 const REALTIME_PROVIDER = "convex";
 const CONVEX_PROXY_URL = "/api/convex";
@@ -177,6 +183,21 @@ function closeInviteOverlay() {
   inviteOverlay.setAttribute("aria-hidden", "true");
 }
 
+function openMatchSetupModal() {
+  if (isOfflineMode || !roomCode || isGameOver) return;
+  const partnerId = Object.keys(names).find((id) => id !== playerId && id !== "bot-player");
+  const partnerName = partnerId ? (names[partnerId] || "Your partner") : "Your partner";
+  setupModalText.textContent = `${partnerName} wants to start the game. Set the max score, then save or save + ready.`;
+  setupMaxScoreInput.value = String(getTargetScore());
+  matchSetupModal.classList.remove("hidden");
+  matchSetupModal.setAttribute("aria-hidden", "false");
+}
+
+function closeMatchSetupModal() {
+  matchSetupModal.classList.add("hidden");
+  matchSetupModal.setAttribute("aria-hidden", "true");
+}
+
 function renderInvite(letter, code, inviteCode) {
   if (!letter || !code || !inviteCode) return;
   const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(code)}&invite=${encodeURIComponent(inviteCode)}`;
@@ -230,7 +251,8 @@ function renderPregameInfo(data = {}) {
   pregamePanel.classList.remove("hidden");
   const votes = data.maxScoreVotes || {};
   const readyPlayers = data.readyPlayers || {};
-  const partnerId = Object.keys(names).find((id) => id !== playerId && id !== "bot-player");
+  const humanIds = Object.keys(names).filter((id) => id !== "bot-player");
+  const partnerId = humanIds.find((id) => id !== playerId);
   const myVote = votes[playerId] || targetScore;
   const partnerVote = partnerId ? votes[partnerId] : null;
   const partnerReady = partnerId ? Boolean(readyPlayers[partnerId]) : false;
@@ -239,10 +261,23 @@ function renderPregameInfo(data = {}) {
     pregameStatus.textContent = `Game on! First to ${data.maxScore || targetScore}.`;
     readyBtn.textContent = "Ready ✅";
     readyBtn.disabled = true;
+    hasShownSetupModal = false;
+    closeMatchSetupModal();
   } else {
     pregameStatus.textContent = "Before the match starts, both lovers must pick the same max score and tap Ready.";
     readyBtn.textContent = `Ready with ${myVote}`;
     readyBtn.disabled = false;
+
+    const shouldShowSetupModal = humanIds.length >= 2;
+    if (shouldShowSetupModal && !hasShownSetupModal) {
+      hasShownSetupModal = true;
+      openMatchSetupModal();
+    }
+
+    if (!shouldShowSetupModal) {
+      hasShownSetupModal = false;
+      closeMatchSetupModal();
+    }
   }
 
   if (partnerId) {
@@ -373,8 +408,8 @@ function finishLocalGame(winningPlayerId, winningTargetScore = targetScore) {
   isGameOver = true;
   winnerId = winningPlayerId;
 
-  joinError.textContent = `Game finished at ${winningTargetScore}.`;
-  setStatus("Game finished", "offline");
+  joinError.textContent = `Match complete at ${winningTargetScore}.`;
+  setStatus("Match complete", "offline");
   showResultModal();
 }
 
@@ -448,6 +483,7 @@ createRoomBtn.addEventListener("click", async () => {
     });
 
     hasShownResultModal = false;
+    hasShownSetupModal = false;
     resultModal.classList.add("hidden");
     resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(data);
@@ -469,6 +505,7 @@ createRoomBtn.addEventListener("click", async () => {
 createBotBtn.addEventListener("click", async () => {
   await leaveCurrentRoom();
   hasShownResultModal = false;
+  hasShownSetupModal = false;
   resultModal.classList.add("hidden");
   resultModal.setAttribute("aria-hidden", "true");
   startOfflineMode();
@@ -519,6 +556,32 @@ readyBtn.addEventListener("click", async () => {
     await syncMatchPreferences(true);
   } catch (error) {
     joinError.textContent = error?.message || "Could not set readiness.";
+  }
+});
+
+saveSetupBtn.addEventListener("click", async () => {
+  setupMaxScoreInput.value = String(clamp(Number.parseInt(setupMaxScoreInput.value, 10) || targetScore, 3, 99));
+  maxScoreInput.value = setupMaxScoreInput.value;
+  setTargetScore(getTargetScore());
+  try {
+    await syncMatchPreferences(false);
+    closeMatchSetupModal();
+    hasShownSetupModal = false;
+  } catch (error) {
+    joinError.textContent = error?.message || "Could not save max score.";
+  }
+});
+
+readyFromSetupBtn.addEventListener("click", async () => {
+  setupMaxScoreInput.value = String(clamp(Number.parseInt(setupMaxScoreInput.value, 10) || targetScore, 3, 99));
+  maxScoreInput.value = setupMaxScoreInput.value;
+  setTargetScore(getTargetScore());
+  try {
+    await syncMatchPreferences(true);
+    closeMatchSetupModal();
+    hasShownSetupModal = false;
+  } catch (error) {
+    joinError.textContent = error?.message || "Could not confirm max score.";
   }
 });
 
@@ -703,6 +766,17 @@ function draw() {
     ctx.font = "700 20px Inter, Arial";
     ctx.fillText("Create or join a room to start", 275, 300);
   }
+
+  if (isGameOver) {
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.fillStyle = "#ffe6ef";
+    ctx.font = "700 38px Inter, Arial";
+    ctx.fillText("MATCH COMPLETE", 315, 280);
+    ctx.font = "600 18px Inter, Arial";
+    const winnerName = winnerId === playerId ? "You" : (names[winnerId] || "Your partner");
+    ctx.fillText(`${winnerName} reached ${targetScore} points`, 330, 315);
+  }
 }
 
 function gameLoop() {
@@ -742,6 +816,7 @@ async function maybeShowInvitationOverlay() {
     });
 
     hasShownResultModal = false;
+    hasShownSetupModal = false;
     resultModal.classList.add("hidden");
     resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(joined);
@@ -778,4 +853,8 @@ window.addEventListener("pagehide", () => {
 closeResultBtn.addEventListener("click", () => {
   resultModal.classList.add("hidden");
   resultModal.setAttribute("aria-hidden", "true");
+});
+
+matchSetupModal.addEventListener("click", (event) => {
+  if (event.target === matchSetupModal) closeMatchSetupModal();
 });

@@ -65,6 +65,8 @@ function roomResponse(room, currentPlayerId = null) {
     gameStarted: Boolean(room.gameStarted),
     maxScoreVotes: room.maxScoreVotes || {},
     readyPlayers: room.readyPlayers || {},
+    promptScoreSetup: Boolean(room.promptScoreSetup),
+    promptScoreSetupFor: room.promptScoreSetupFor || null,
   };
 }
 
@@ -155,6 +157,8 @@ export const createRoom = mutation({
       maxScoreVotes,
       readyPlayers,
       gameStarted: mode === "bot-duo",
+      promptScoreSetup: false,
+      promptScoreSetupFor: null,
       isGameOver: false,
       winnerId: null,
       players,
@@ -210,6 +214,9 @@ export const joinRoom = mutation({
     const humanIds = Object.keys(players).filter((id) => id !== BOT_ID);
     const allReady = humanIds.length > 0 && humanIds.every((id) => Boolean(readyPlayers[id]));
     const sameVote = humanIds.length > 0 && humanIds.every((id) => votes[id] === votes[humanIds[0]]);
+    const gameStarted = room.mode === "bot-duo" ? true : (allReady && sameVote);
+    const partnerId = humanIds.find((id) => id !== playerId) || null;
+    const shouldPromptSetup = room.mode !== "bot-duo" && humanIds.length === 2 && !gameStarted;
 
     await ctx.db.patch(room._id, {
       players,
@@ -217,8 +224,10 @@ export const joinRoom = mutation({
       names,
       maxScoreVotes: votes,
       readyPlayers,
-      gameStarted: room.mode === "bot-duo" ? true : (allReady && sameVote),
+      gameStarted,
       maxScore: sameVote ? votes[humanIds[0]] : room.maxScore,
+      promptScoreSetup: shouldPromptSetup,
+      promptScoreSetupFor: shouldPromptSetup ? partnerId : null,
     });
 
     const updated = await ctx.db.get(room._id);
@@ -327,6 +336,8 @@ export const setMatchPreferences = mutation({
       readyPlayers,
       gameStarted,
       maxScore: selectedMax,
+      promptScoreSetup: false,
+      promptScoreSetupFor: null,
     });
 
     const updated = await ctx.db.get(room._id);
@@ -373,6 +384,8 @@ export const leaveRoom = mutation({
       readyPlayers,
       gameStarted: room.mode === "bot-duo" ? true : (allReady && sameVote),
       maxScore: sameVote ? maxScoreVotes[humanIds[0]] : room.maxScore,
+      promptScoreSetup: false,
+      promptScoreSetupFor: null,
     });
 
     return { deleted: false, left: true };
