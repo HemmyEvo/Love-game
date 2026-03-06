@@ -147,6 +147,7 @@ document.addEventListener("keydown", (event) => {
     keys.add(direction);
   }
 });
+
 document.addEventListener("keyup", (event) => {
   const direction = keyMap[event.code];
   if (direction) keys.delete(direction);
