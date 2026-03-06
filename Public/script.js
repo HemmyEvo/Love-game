@@ -35,6 +35,8 @@ let names = {};
 let connected = false;
 let socketReady = false;
 let pendingRoomCreation = false;
+let isOfflineMode = false; // New flag for offline play
+
 const urlParams = new URLSearchParams(window.location.search);
 const invitedRoomCodeFromLink = (urlParams.get("room") || "")
   .toUpperCase()
@@ -129,32 +131,113 @@ function renderInvite(letter, code, inviteCode) {
   });
 }
 
+// --- OFFLINE LOGIC ---
+function createLoveItem(seed = 0) {
+  return {
+    id: `${Date.now()}-${Math.random()}-${seed}`,
+    x: Math.random() * (WORLD_WIDTH - 24) + 12,
+    y: Math.random() * (WORLD_HEIGHT - 24) + 12,
+    type: Math.floor(Math.random() * 4)
+  };
+}
+
+function startOfflineMode() {
+  isOfflineMode = true;
+  playerId = "local-player";
+  const botId = "local-bot";
+
+  players = {
+    [playerId]: {
+      x: Math.random() * (WORLD_WIDTH - 100) + 50,
+      y: Math.random() * (WORLD_HEIGHT - 100) + 50,
+      color: `hsl(${Math.floor(Math.random() * 360)}, 95%, 60%)`
+    },
+    [botId]: { x: 160, y: 140, color: "#92ccff" }
+  };
+
+  names = {
+    [playerId]: getLoverName(),
+    [botId]: "Cupid Bot (Offline)"
+  };
+
+  scores = {
+    [playerId]: 0,
+    [botId]: 0
+  };
+
+  loveItems = Array.from({ length: 22 }, (_, i) => createLoveItem(i));
+
+  setRoom("OFFLINE");
+  updateScoreboard();
+  joinError.textContent = "";
+  lobby.classList.add("compact");
+  setStatus("Offline Bot Mode", "offline");
+}
+
+function runOfflineTick() {
+  const botId = "local-bot";
+  const bot = players[botId];
+
+  // Offline Bot AI
+  if (bot && loveItems.length > 0) {
+    let nearest = null;
+    let nearestDistance = Infinity;
+    loveItems.forEach((item) => {
+      const d = (item.x - bot.x) ** 2 + (item.y - bot.y) ** 2;
+      if (d < nearestDistance) {
+        nearestDistance = d;
+        nearest = item;
+      }
+    });
+
+    if (nearest) {
+      bot.x += Math.sign(nearest.x - bot.x) * 1.6;
+      bot.y += Math.sign(nearest.y - bot.y) * 1.6;
+    }
+  }
+
+  // Offline Collisions
+  Object.keys(players).forEach((id) => {
+    const player = players[id];
+    for (let i = loveItems.length - 1; i >= 0; i -= 1) {
+      const item = loveItems[i];
+      if (Math.hypot(player.x - item.x, player.y - item.y) < 30) {
+        scores[id] = (scores[id] || 0) + 1;
+        loveItems.splice(i, 1);
+        loveItems.push(createLoveItem(i));
+        updateScoreboard();
+      }
+    }
+  });
+}
+// ---------------------
+
 socket.on("connect", () => {
   connected = true;
   socketReady = true;
-  setStatus("Connected", "online");
+  if (!isOfflineMode) setStatus("Connected", "online");
 });
 
 socket.on("disconnect", (reason) => {
   connected = false;
   socketReady = false;
-  setStatus(`Disconnected (${reason})`, "offline");
+  if (!isOfflineMode) setStatus(`Disconnected (${reason})`, "offline");
 });
 
 socket.io.on("reconnect_attempt", () => {
-  setStatus("Reconnecting…", "offline");
+  if (!isOfflineMode) setStatus("Reconnecting…", "offline");
 });
 
 socket.io.on("reconnect", () => {
   connected = true;
   socketReady = true;
-  setStatus("Reconnected", "online");
+  if (!isOfflineMode) setStatus("Reconnected", "online");
 });
 
 socket.on("connect_error", () => {
   connected = false;
   socketReady = false;
-  setStatus("Connection failed", "offline");
+  if (!isOfflineMode) setStatus("Connection failed", "offline");
 });
 
 socket.on("joinError", ({ message }) => {
@@ -162,6 +245,7 @@ socket.on("joinError", ({ message }) => {
 });
 
 socket.on("init", (data) => {
+  isOfflineMode = false; // Reset offline flag if we join an online game
   playerId = data.playerId;
   players = data.players;
   loveItems = data.loveItems;
@@ -181,6 +265,7 @@ socket.on("init", (data) => {
 });
 
 socket.on("gameUpdate", (data) => {
+  if (isOfflineMode) return; // Ignore server updates if playing offline
   players = data.players || {};
   loveItems = data.loveItems || [];
   scores = data.scores || {};
@@ -190,19 +275,28 @@ socket.on("gameUpdate", (data) => {
 });
 
 createRoomBtn.addEventListener("click", () => {
-  if (!connected) return;
+  if (!connected) {
+    joinError.textContent = "You must be connected to the internet to play with a friend.";
+    return;
+  }
   pendingRoomCreation = true;
   safeEmit("createRoom", { loverName: getLoverName(), withBot: false });
 });
 
 createBotBtn.addEventListener("click", () => {
-  if (!connected) return;
+  if (!connected) {
+    startOfflineMode(); // Launch offline mode if socket drops
+    return;
+  }
   pendingRoomCreation = true;
   safeEmit("createRoom", { loverName: getLoverName(), withBot: true });
 });
 
 joinRoomBtn.addEventListener("click", () => {
-  if (!connected) return;
+  if (!connected) {
+    joinError.textContent = "You must be connected to the internet to join a room.";
+    return;
+  }
   pendingRoomCreation = false;
   const code = roomCodeInput.value.toUpperCase().trim();
   safeEmit("joinRoom", { loverName: getLoverName(), roomCode: code });
@@ -316,7 +410,7 @@ function moveSelf() {
   me.x = clamp(me.x + clamp(vx, -1, 1) * speed, 15, WORLD_WIDTH - 15);
   me.y = clamp(me.y + clamp(vy, -1, 1) * speed, 15, WORLD_HEIGHT - 15);
 
-  if (socketReady) {
+  if (socketReady && !isOfflineMode) {
     safeEmit("move", { x: me.x, y: me.y });
   }
 }
@@ -382,6 +476,11 @@ function draw() {
 
 function gameLoop() {
   moveSelf();
+  
+  if (isOfflineMode) {
+    runOfflineTick();
+  }
+
   draw();
   requestAnimationFrame(gameLoop);
 }
