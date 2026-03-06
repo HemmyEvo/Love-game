@@ -48,7 +48,9 @@ const inviteTokenFromLink = (urlParams.get("invite") || "")
 
 const joystickState = { x: 0, y: 0, active: false };
 
-const socket = io(window.location.origin, {
+const socketServerUrl = window.location.protocol === "file:" ? "http://localhost:3000" : undefined;
+
+const socket = io(socketServerUrl, {
   path: "/socket.io",
   transports: ["websocket", "polling"],
   reconnection: true,
@@ -234,10 +236,16 @@ socket.io.on("reconnect", () => {
   if (!isOfflineMode) setStatus("Reconnected", "online");
 });
 
-socket.on("connect_error", () => {
+socket.on("connect_error", (error) => {
   connected = false;
   socketReady = false;
-  if (!isOfflineMode) setStatus("Connection failed", "offline");
+  if (!isOfflineMode) {
+    const hint = window.location.protocol === "file:"
+      ? " — run `npm start` and open http://localhost:3000"
+      : "";
+    setStatus(`Connection failed${hint}`, "offline");
+  }
+  console.error("Socket connection failed:", error?.message || error);
 });
 
 socket.on("joinError", ({ message }) => {
