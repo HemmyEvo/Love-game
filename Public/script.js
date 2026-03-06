@@ -22,6 +22,14 @@ const inviteOverlay = document.getElementById("inviteOverlay");
 const incomingCodeElement = document.getElementById("incomingCode");
 const copyIncomingCodeBtn = document.getElementById("copyIncomingCodeBtn");
 const useIncomingCodeBtn = document.getElementById("useIncomingCodeBtn");
+const pregamePanel = document.getElementById("pregamePanel");
+const pregameStatus = document.getElementById("pregameStatus");
+const partnerChoice = document.getElementById("partnerChoice");
+const readyBtn = document.getElementById("readyBtn");
+const resultModal = document.getElementById("resultModal");
+const resultTitle = document.getElementById("resultTitle");
+const resultBody = document.getElementById("resultBody");
+const closeResultBtn = document.getElementById("closeResultBtn");
 
 const WORLD_WIDTH = 960;
 const WORLD_HEIGHT = 600;
@@ -41,6 +49,7 @@ let targetScore = 15;
 let isGameOver = false;
 let winnerId = null;
 let pollTimer = null;
+let hasShownResultModal = false;
 
 const REALTIME_PROVIDER = "convex";
 const CONVEX_PROXY_URL = "/api/convex";
@@ -50,18 +59,24 @@ const CONVEX_FUNCTIONS = {
   move: "game:move",
   getRoomState: "game:getRoomState",
   validateInvitation: "game:validateInvitation",
+  setMatchPreferences: "game:setMatchPreferences",
 };
 
-const REQUIRED_CONVEX_FUNCTION_PATHS = ["game:getRoomState", "game:createRoom"];
+const REQUIRED_CONVEX_FUNCTION_PATHS = [
+  "game:createRoom",
+  "game:joinRoom",
+  "game:move",
+  "game:getRoomState",
+  "game:validateInvitation",
+  "game:setMatchPreferences",
+];
 const configuredConvexFunctionPaths = new Set(Object.values(CONVEX_FUNCTIONS));
 const missingRequiredConvexFunctions = REQUIRED_CONVEX_FUNCTION_PATHS.filter(
   (path) => !configuredConvexFunctionPaths.has(path)
 );
 
 if (missingRequiredConvexFunctions.length) {
-  throw new Error(
-    `Missing required Convex functions: ${missingRequiredConvexFunctions.join(", ")}`
-  );
+  throw new Error(`Missing required Convex functions: ${missingRequiredConvexFunctions.join(", ")}`);
 }
 
 const DEVICE_ID_KEY = "love-rush-device-id";
@@ -184,7 +199,73 @@ function renderInvite(letter, code, inviteCode) {
   });
 }
 
+function showResultModal() {
+  if (!isGameOver || hasShownResultModal || !winnerId) return;
+  hasShownResultModal = true;
+  const winnerName = winnerId === playerId ? "You" : (names[winnerId] || "Your lover");
+  const loserName = winnerId === playerId
+    ? Object.keys(names).find((id) => id !== playerId) ? "Your lover" : "Cupid Bot"
+    : "You";
+
+  if (winnerId === playerId) {
+    resultTitle.textContent = "🏆 Hearts Champion";
+    resultBody.textContent = `You won this love race! ${loserName} sends kisses and requests a rematch 💋`; 
+  } else {
+    resultTitle.textContent = "💞 Sweet Defeat";
+    resultBody.textContent = `${winnerName} won this round, but your love story gets a romantic sequel. Tap to play again!`;
+  }
+
+  resultModal.classList.remove("hidden");
+  resultModal.setAttribute("aria-hidden", "false");
+}
+
+function renderPregameInfo(data = {}) {
+  if (!roomCode || isOfflineMode) {
+    pregamePanel.classList.add("hidden");
+    return;
+  }
+
+  pregamePanel.classList.remove("hidden");
+  const votes = data.maxScoreVotes || {};
+  const readyPlayers = data.readyPlayers || {};
+  const partnerId = Object.keys(names).find((id) => id !== playerId && id !== "bot-player");
+  const myVote = votes[playerId] || targetScore;
+  const partnerVote = partnerId ? votes[partnerId] : null;
+  const partnerReady = partnerId ? Boolean(readyPlayers[partnerId]) : false;
+
+  if (data.gameStarted) {
+    pregameStatus.textContent = `Game on! First to ${data.maxScore || targetScore}.`;
+    readyBtn.textContent = "Ready ✅";
+    readyBtn.disabled = true;
+  } else {
+    pregameStatus.textContent = "Before the match starts, both lovers must pick the same max score and tap Ready.";
+    readyBtn.textContent = `Ready with ${myVote}`;
+    readyBtn.disabled = false;
+  }
+
+  if (partnerId) {
+    const partnerName = names[partnerId] || "Partner";
+    partnerChoice.textContent = `${partnerName} chose ${partnerVote ?? "—"} ${partnerReady ? "and is ready ✅" : "(not ready yet)"}`;
+  } else if (data.mode === "bot-duo") {
+    partnerChoice.textContent = "Cupid Bot is always ready 😄";
+  } else {
+    partnerChoice.textContent = "Waiting for your partner to join...";
+  }
+}
+
+async function syncMatchPreferences(ready) {
+  if (!roomCode || !playerId || isOfflineMode) return;
+  const data = await convexCall("mutation", CONVEX_FUNCTIONS.setMatchPreferences, {
+    roomCode,
+    playerId,
+    maxScore: getTargetScore(),
+    ready,
+  });
+  applyRoomState(data);
+}
+
 function applyRoomState(data = {}) {
+  const wasGameOver = isGameOver;
   isOfflineMode = false;
   isGameOver = Boolean(data.isGameOver);
   winnerId = data.winnerId || null;
@@ -196,6 +277,8 @@ function applyRoomState(data = {}) {
   setTargetScore(data.maxScore || targetScore || 15);
   setRoom(data.roomCode || roomCode);
   updateScoreboard();
+  renderPregameInfo(data);
+  if (!wasGameOver && isGameOver) showResultModal();
   checkForWinnerFromScores();
 }
 
@@ -278,14 +361,9 @@ function finishLocalGame(winningPlayerId, winningTargetScore = targetScore) {
   isGameOver = true;
   winnerId = winningPlayerId;
 
-  const winnerName = names[winningPlayerId] || "Lover";
-  const wonByYou = winningPlayerId === playerId;
-
-  joinError.textContent = wonByYou
-    ? `You won! Reached ${winningTargetScore} 💖`
-    : `${winnerName} won by reaching ${winningTargetScore}.`;
-
+  joinError.textContent = `Game finished at ${winningTargetScore}.`;
   setStatus("Game finished", "offline");
+  showResultModal();
 }
 
 function checkForWinnerFromScores() {
@@ -356,6 +434,9 @@ createRoomBtn.addEventListener("click", async () => {
       deviceId: localDeviceId,
     });
 
+    hasShownResultModal = false;
+    resultModal.classList.add("hidden");
+    resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(data);
     if (pendingRoomCreation && data?.letter && data?.inviteCode) {
       renderInvite(data.letter, data.roomCode, data.inviteCode);
@@ -364,6 +445,7 @@ createRoomBtn.addEventListener("click", async () => {
     joinError.textContent = "";
     lobby.classList.add("compact");
     setStatus("Duo Multiplayer", "online");
+    try { await syncMatchPreferences(false); } catch (_error) {}
     startPolling();
   } catch (error) {
     pendingRoomCreation = false;
@@ -386,6 +468,9 @@ createBotBtn.addEventListener("click", async () => {
       deviceId: localDeviceId,
     });
 
+    hasShownResultModal = false;
+    resultModal.classList.add("hidden");
+    resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(data);
     if (pendingRoomCreation && data?.letter && data?.inviteCode) {
       renderInvite(data.letter, data.roomCode, data.inviteCode);
@@ -421,15 +506,31 @@ joinRoomBtn.addEventListener("click", async () => {
     joinError.textContent = "";
     lobby.classList.add("compact");
     setStatus(data?.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
+    try { await syncMatchPreferences(false); } catch (_error) {}
     startPolling();
   } catch (error) {
     joinError.textContent = error?.message || "Could not join room.";
   }
 });
 
-maxScoreInput.addEventListener("change", () => {
+maxScoreInput.addEventListener("change", async () => {
   maxScoreInput.value = String(getTargetScore());
   setTargetScore(getTargetScore());
+  if (roomCode && !isOfflineMode && playerId) {
+    try {
+      await syncMatchPreferences(false);
+    } catch (_error) {
+      // ignore sync hiccups
+    }
+  }
+});
+
+readyBtn.addEventListener("click", async () => {
+  try {
+    await syncMatchPreferences(true);
+  } catch (error) {
+    joinError.textContent = error?.message || "Could not set readiness.";
+  }
 });
 
 setTargetScore(getTargetScore());
@@ -536,6 +637,7 @@ async function sendMoveUpdate(x, y) {
 
 function moveSelf() {
   if (!playerId || !players[playerId] || isGameOver) return;
+  if (!isOfflineMode && pregamePanel && !readyBtn.disabled) return;
 
   const me = players[playerId];
   const speed = 4.7;
@@ -640,13 +742,30 @@ async function maybeShowInvitationOverlay() {
 
     roomCodeInput.value = data.roomCode;
     openInviteOverlay(data.roomCode);
+
+    if (!connected) return;
+    const joined = await convexCall("mutation", CONVEX_FUNCTIONS.joinRoom, {
+      loverName: getLoverName(),
+      roomCode: data.roomCode,
+      inviteCode: inviteTokenFromLink,
+      deviceId: localDeviceId,
+    });
+
+    hasShownResultModal = false;
+    resultModal.classList.add("hidden");
+    resultModal.setAttribute("aria-hidden", "true");
+    applyRoomState(joined);
+    closeInviteOverlay();
+    joinError.textContent = "";
+    lobby.classList.add("compact");
+    setStatus(joined?.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
+    startPolling();
   } catch (_error) {
     // Fail silently if invitation check is temporarily unavailable.
   }
 }
 
-checkConvexHealth();
-maybeShowInvitationOverlay();
+checkConvexHealth().then(() => maybeShowInvitationOverlay());
 
 copyIncomingCodeBtn.addEventListener("click", async () => {
   await copyText(incomingCodeElement.textContent);
@@ -660,4 +779,9 @@ useIncomingCodeBtn.addEventListener("click", () => {
 
 inviteOverlay.addEventListener("click", (event) => {
   if (event.target === inviteOverlay) closeInviteOverlay();
+});
+
+closeResultBtn.addEventListener("click", () => {
+  resultModal.classList.add("hidden");
+  resultModal.setAttribute("aria-hidden", "true");
 });
