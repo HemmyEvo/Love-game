@@ -49,6 +49,33 @@ async function findRoomByCode(ctx, roomCode) {
     .first();
 }
 
+async function listRoomPresence(ctx, roomCode) {
+  return ctx.db
+    .query("roomPresence")
+    .filter((q) => q.eq(q.field("roomCode"), roomCode))
+    .collect();
+}
+
+async function getPresenceDoc(ctx, roomCode, playerId) {
+  return ctx.db
+    .query("roomPresence")
+    .filter((q) => q.and(q.eq(q.field("roomCode"), roomCode), q.eq(q.field("playerId"), playerId)))
+    .first();
+}
+
+function mergePlayersWithPresence(room, presenceDocs) {
+  const players = { ...(room.players || {}) };
+  presenceDocs.forEach((doc) => {
+    if (!players[doc.playerId]) return;
+    players[doc.playerId] = {
+      ...players[doc.playerId],
+      x: doc.x,
+      y: doc.y,
+    };
+  });
+  return players;
+}
+
 function roomResponse(room, currentPlayerId = null) {
   return {
     roomCode: room.roomCode,
@@ -167,6 +194,24 @@ export const createRoom = mutation({
       loveItems: Array.from({ length: INITIAL_LOVE_ITEMS }, (_, i) => createLoveItem(i)),
     });
 
+    await ctx.db.insert("roomPresence", {
+      roomCode,
+      playerId,
+      x: players[playerId].x,
+      y: players[playerId].y,
+      updatedAt: Date.now(),
+    });
+
+    if (mode === "bot-duo") {
+      await ctx.db.insert("roomPresence", {
+        roomCode,
+        playerId: BOT_ID,
+        x: players[BOT_ID].x,
+        y: players[BOT_ID].y,
+        updatedAt: Date.now(),
+      });
+    }
+
     const room = await ctx.db.get(roomId);
     return {
       ...roomResponse(room, playerId),
@@ -199,10 +244,22 @@ export const joinRoom = mutation({
     const readyPlayers = { ...(room.readyPlayers || {}) };
 
     if (!players[playerId]) {
-      players[playerId] = createPlayer();
+      const newPlayer = createPlayer();
+      players[playerId] = newPlayer;
       scores[playerId] = scores[playerId] || 0;
       votes[playerId] = votes[playerId] || room.maxScore || 15;
       readyPlayers[playerId] = false;
+
+      const existingPresence = await getPresenceDoc(ctx, roomCode, playerId);
+      if (!existingPresence) {
+        await ctx.db.insert("roomPresence", {
+          roomCode,
+          playerId,
+          x: newPlayer.x,
+          y: newPlayer.y,
+          updatedAt: Date.now(),
+        });
+      }
     }
 
     names[playerId] = normalizeName(args.loverName);
@@ -239,7 +296,8 @@ export const move = mutation({
     y: v.number(),
   },
   handler: async (ctx, args) => {
-    const room = await findRoomByCode(ctx, args.roomCode.trim().toUpperCase());
+    const roomCode = args.roomCode.trim().toUpperCase();
+    const room = await findRoomByCode(ctx, roomCode);
     if (!room) throw new Error("Room not found");
     if (room.isGameOver) return roomResponse(room, args.playerId);
 
@@ -248,29 +306,65 @@ export const move = mutation({
       throw new Error("Player not found in room");
     }
 
-    players[args.playerId] = {
-      ...players[args.playerId],
-      x: clamp(args.x, 15, WORLD_WIDTH - 15),
-      y: clamp(args.y, 15, WORLD_HEIGHT - 15),
-    };
+    const nextX = clamp(args.x, 15, WORLD_WIDTH - 15);
+    const nextY = clamp(args.y, 15, WORLD_HEIGHT - 15);
+    const playerPresence = await getPresenceDoc(ctx, roomCode, args.playerId);
 
-    const current = room.players?.[args.playerId];
-    if (current && current.x === players[args.playerId].x && current.y === players[args.playerId].y) {
-      return roomResponse(room, args.playerId);
+    if (playerPresence) {
+      if (playerPresence.x === nextX && playerPresence.y === nextY) {
+        const unchangedPresence = await listRoomPresence(ctx, roomCode);
+        return roomResponse({ ...room, players: mergePlayersWithPresence(room, unchangedPresence) }, args.playerId);
+      }
+
+      await ctx.db.patch(playerPresence._id, {
+        x: nextX,
+        y: nextY,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.db.insert("roomPresence", {
+        roomCode,
+        playerId: args.playerId,
+        x: nextX,
+        y: nextY,
+        updatedAt: Date.now(),
+      });
     }
 
-    const next = collectLove({ ...room, players });
+    const roomPresence = await listRoomPresence(ctx, roomCode);
+    const mergedPlayers = mergePlayersWithPresence(room, roomPresence);
+    const next = collectLove({ ...room, players: mergedPlayers });
 
-    await ctx.db.patch(room._id, {
-      players: next.players,
-      scores: next.scores,
-      loveItems: next.loveItems,
-      isGameOver: next.isGameOver,
-      winnerId: next.winnerId,
-    });
+    const roomPatch = {};
+    if (JSON.stringify(next.scores) !== JSON.stringify(room.scores || {})) roomPatch.scores = next.scores;
+    if (JSON.stringify(next.loveItems) !== JSON.stringify(room.loveItems || [])) roomPatch.loveItems = next.loveItems;
+    if (next.isGameOver !== Boolean(room.isGameOver)) roomPatch.isGameOver = next.isGameOver;
+    if (next.winnerId !== (room.winnerId || null)) roomPatch.winnerId = next.winnerId;
+
+    const botMoved =
+      room.mode === "bot-duo" &&
+      mergedPlayers[BOT_ID] &&
+      next.players[BOT_ID] &&
+      (mergedPlayers[BOT_ID].x !== next.players[BOT_ID].x || mergedPlayers[BOT_ID].y !== next.players[BOT_ID].y);
+
+    if (botMoved) {
+      const botPresence = await getPresenceDoc(ctx, roomCode, BOT_ID);
+      if (botPresence) {
+        await ctx.db.patch(botPresence._id, {
+          x: next.players[BOT_ID].x,
+          y: next.players[BOT_ID].y,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+
+    if (Object.keys(roomPatch).length > 0) {
+      await ctx.db.patch(room._id, roomPatch);
+    }
 
     const updated = await ctx.db.get(room._id);
-    return roomResponse(updated, args.playerId);
+    const updatedPresence = await listRoomPresence(ctx, roomCode);
+    return roomResponse({ ...updated, players: mergePlayersWithPresence(updated, updatedPresence) }, args.playerId);
   },
 });
 
@@ -285,7 +379,8 @@ export const getRoomState = query({
 
     const room = await findRoomByCode(ctx, roomCode);
     if (!room) throw new Error("Room not found");
-    return roomResponse(room, args.playerId || null);
+    const presence = await listRoomPresence(ctx, roomCode);
+    return roomResponse({ ...room, players: mergePlayersWithPresence(room, presence) }, args.playerId || null);
   },
 });
 
@@ -353,7 +448,8 @@ export const leaveRoom = mutation({
     playerId: v.string(),
   },
   handler: async (ctx, args) => {
-    const room = await findRoomByCode(ctx, args.roomCode.trim().toUpperCase());
+    const roomCode = args.roomCode.trim().toUpperCase();
+    const room = await findRoomByCode(ctx, roomCode);
     if (!room) return { deleted: false, left: false };
 
     const players = { ...(room.players || {}) };
@@ -368,8 +464,13 @@ export const leaveRoom = mutation({
     delete maxScoreVotes[args.playerId];
     delete readyPlayers[args.playerId];
 
+    const presence = await getPresenceDoc(ctx, roomCode, args.playerId);
+    if (presence) await ctx.db.delete(presence._id);
+
     const humanIds = Object.keys(players).filter((id) => id !== BOT_ID);
     if (humanIds.length === 0) {
+      const allPresence = await listRoomPresence(ctx, roomCode);
+      await Promise.all(allPresence.map((doc) => ctx.db.delete(doc._id)));
       await ctx.db.delete(room._id);
       return { deleted: true, left: true };
     }
