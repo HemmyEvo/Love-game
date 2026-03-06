@@ -48,11 +48,12 @@ const joystickState = { x: 0, y: 0, active: false };
 
 const socket = io(window.location.origin, {
   path: "/socket.io",
+  transports: ["websocket", "polling"],
   reconnection: true,
   reconnectionAttempts: Infinity,
   reconnectionDelay: 600,
   reconnectionDelayMax: 4000,
-  timeout: 10000,
+  timeout: 20000,
   autoConnect: true
 });
 
