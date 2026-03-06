@@ -14,10 +14,12 @@ When creating a room, the creator can set a **target score** (first to N wins).
 
 ## Realtime provider notes
 
-Current realtime provider is set to **Convex mode** in the client, using the existing Socket.IO bridge transport.
+Realtime is now handled with **Convex HTTP APIs only** (no Socket.IO bridge).
 
-If you want to migrate to Convex later, edit these placeholders in `Public/script.js`:
+Move updates are sent via Convex mutations, and game state is refreshed by high-frequency Convex queries for realtime gameplay.
 
-- `REALTIME_PROVIDER`
+Convex config lives in `Public/script.js`:
+
 - `CONVEX_HTTP_URL`
 - `CONVEX_DEPLOY_KEY`
+- `CONVEX_FUNCTIONS`
