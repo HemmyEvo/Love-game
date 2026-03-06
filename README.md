@@ -20,6 +20,5 @@ Move updates are sent via Convex mutations, and game state is refreshed by high-
 
 Convex config lives in `Public/script.js`:
 
-- `CONVEX_HTTP_URL`
-- `CONVEX_DEPLOY_KEY`
+- `/api/convex` proxy endpoint
 - `CONVEX_FUNCTIONS`

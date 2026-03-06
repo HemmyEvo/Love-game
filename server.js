@@ -1,8 +1,12 @@
 const path = require("path");
 const express = require("express");
+const convexProxyHandler = require("./api/convex");
 
 const app = express();
 const publicDir = path.join(__dirname, "Public");
+
+app.use(express.json());
+app.post("/api/convex", (req, res) => convexProxyHandler(req, res));
 
 app.use(express.static(publicDir));
 app.get("/", (_req, res) => {

@@ -43,8 +43,7 @@ let winnerId = null;
 let pollTimer = null;
 
 const REALTIME_PROVIDER = "convex";
-const CONVEX_HTTP_URL = "https://rugged-alpaca-539.convex.site";
-const CONVEX_DEPLOY_KEY = "dev:rugged-alpaca-539|eyJ2MiI6IjRiYzhmOTZkN2NjNDRmYzBiNTI3ZjAyN2U5YjliYmYxIn0=";
+const CONVEX_PROXY_URL = "/api/convex";
 const CONVEX_FUNCTIONS = {
   createRoom: "game:createRoom",
   joinRoom: "game:joinRoom",
@@ -74,13 +73,12 @@ const inviteTokenFromLink = (urlParams.get("invite") || "")
 const joystickState = { x: 0, y: 0, active: false };
 
 async function convexCall(kind, path, args = {}) {
-  const response = await fetch(`${CONVEX_HTTP_URL}/api/${kind}`, {
+  const response = await fetch(CONVEX_PROXY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Convex ${CONVEX_DEPLOY_KEY}`,
     },
-    body: JSON.stringify({ path, args }),
+    body: JSON.stringify({ kind, path, args }),
   });
 
   if (!response.ok) {
@@ -206,12 +204,6 @@ function startPolling() {
 }
 
 async function checkConvexHealth() {
-  if (!CONVEX_HTTP_URL || !CONVEX_DEPLOY_KEY) {
-    connected = false;
-    setStatus("Convex config missing", "offline");
-    return;
-  }
-
   try {
     await convexCall("query", CONVEX_FUNCTIONS.getRoomState, { roomCode: "", playerId: "" });
     connected = true;
