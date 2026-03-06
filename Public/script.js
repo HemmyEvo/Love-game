@@ -43,8 +43,8 @@ let isGameOver = false;
 
 const REALTIME_PROVIDER = "socketio";
 // Convex placeholders for future migration (fill these when switching provider).
-const CONVEX_HTTP_URL = "";
-const CONVEX_DEPLOY_KEY = "";
+const CONVEX_HTTP_URL = "https://rugged-alpaca-539.convex.site";
+const CONVEX_DEPLOY_KEY = "dev:rugged-alpaca-539|eyJ2MiI6IjRiYzhmOTZkN2NjNDRmYzBiNTI3ZjAyN2U5YjliYmYxIn0=";
 
 const urlParams = new URLSearchParams(window.location.search);
 const invitedRoomCodeFromLink = (urlParams.get("room") || "")
