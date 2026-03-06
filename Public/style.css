@@ -236,6 +236,17 @@ canvas {
   color: #ffd1dd;
 }
 
+.pregame-actions {
+  display: grid;
+  gap: 8px;
+}
+
+@media (min-width: 760px) {
+  .pregame-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .result-modal {
   position: fixed;
   inset: 0;
@@ -262,4 +273,23 @@ canvas {
   background: #4f1f36;
   color: #ffeef5;
   border-color: #4f1f36;
+}
+
+.setup-card {
+  text-align: left;
+}
+
+.setup-card p {
+  color: #57253a;
+}
+
+.setup-card input {
+  background: #fff;
+  color: #34101f;
+  border-color: #d8a4b9;
+}
+
+.setup-actions {
+  display: grid;
+  gap: 8px;
 }
