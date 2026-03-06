@@ -26,6 +26,7 @@ const pregamePanel = document.getElementById("pregamePanel");
 const pregameStatus = document.getElementById("pregameStatus");
 const partnerChoice = document.getElementById("partnerChoice");
 const readyBtn = document.getElementById("readyBtn");
+const openSetupBtn = document.getElementById("openSetupBtn");
 const resultModal = document.getElementById("resultModal");
 const resultTitle = document.getElementById("resultTitle");
 const resultBody = document.getElementById("resultBody");
@@ -261,23 +262,13 @@ function renderPregameInfo(data = {}) {
     pregameStatus.textContent = `Game on! First to ${data.maxScore || targetScore}.`;
     readyBtn.textContent = "Ready ✅";
     readyBtn.disabled = true;
-    hasShownSetupModal = false;
+    openSetupBtn.disabled = true;
     closeMatchSetupModal();
   } else {
     pregameStatus.textContent = "Before the match starts, both lovers must pick the same max score and tap Ready.";
     readyBtn.textContent = `Ready with ${myVote}`;
     readyBtn.disabled = false;
-
-    const shouldShowSetupModal = humanIds.length >= 2;
-    if (shouldShowSetupModal && !hasShownSetupModal) {
-      hasShownSetupModal = true;
-      openMatchSetupModal();
-    }
-
-    if (!shouldShowSetupModal) {
-      hasShownSetupModal = false;
-      closeMatchSetupModal();
-    }
+    openSetupBtn.disabled = humanIds.length < 2;
   }
 
   if (partnerId) {
@@ -559,6 +550,11 @@ readyBtn.addEventListener("click", async () => {
   }
 });
 
+openSetupBtn.addEventListener("click", () => {
+  if (openSetupBtn.disabled) return;
+  openMatchSetupModal();
+});
+
 saveSetupBtn.addEventListener("click", async () => {
   setupMaxScoreInput.value = String(clamp(Number.parseInt(setupMaxScoreInput.value, 10) || targetScore, 3, 99));
   maxScoreInput.value = setupMaxScoreInput.value;
@@ -566,7 +562,6 @@ saveSetupBtn.addEventListener("click", async () => {
   try {
     await syncMatchPreferences(false);
     closeMatchSetupModal();
-    hasShownSetupModal = false;
   } catch (error) {
     joinError.textContent = error?.message || "Could not save max score.";
   }
@@ -579,7 +574,6 @@ readyFromSetupBtn.addEventListener("click", async () => {
   try {
     await syncMatchPreferences(true);
     closeMatchSetupModal();
-    hasShownSetupModal = false;
   } catch (error) {
     joinError.textContent = error?.message || "Could not confirm max score.";
   }

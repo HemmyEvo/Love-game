@@ -236,6 +236,17 @@ canvas {
   color: #ffd1dd;
 }
 
+.pregame-actions {
+  display: grid;
+  gap: 8px;
+}
+
+@media (min-width: 760px) {
+  .pregame-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .result-modal {
   position: fixed;
   inset: 0;
