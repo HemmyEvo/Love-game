@@ -2,121 +2,129 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const scoresElement = document.getElementById("scores");
 const statusPill = document.getElementById("statusPill");
+const roomBadge = document.getElementById("roomBadge");
 const touchPad = document.getElementById("touchPad");
+const lobby = document.getElementById("lobby");
+const joinError = document.getElementById("joinError");
+const loveLetter = document.getElementById("loveLetter");
+
+const createRoomBtn = document.getElementById("createRoomBtn");
+const createBotBtn = document.getElementById("createBotBtn");
+const joinRoomBtn = document.getElementById("joinRoomBtn");
+const loverNameInput = document.getElementById("loverName");
+const roomCodeInput = document.getElementById("roomCodeInput");
 
 const WORLD_WIDTH = 960;
 const WORLD_HEIGHT = 600;
 canvas.width = WORLD_WIDTH;
 canvas.height = WORLD_HEIGHT;
 
-let scale = 1;
-let playerId;
+let playerId = null;
+let roomCode = null;
 let players = {};
 let loveItems = [];
 let scores = {};
+let names = {};
 let connected = false;
 
-const localPlayerId = "you";
-let combo = 0;
-let comboTimeout;
+const socket = io({ transports: ["websocket", "polling"], reconnectionAttempts: 4 });
 
-const socket = io({
-  transports: ["websocket", "polling"],
-  reconnectionAttempts: 4
-});
-
-function setStatus(text, css = "offline") {
+function setStatus(text, state = "offline") {
   statusPill.textContent = text;
-  statusPill.dataset.state = css;
+  statusPill.dataset.state = state;
+}
+
+function getLoverName() {
+  return loverNameInput.value.trim() || "Lover";
+}
+
+function setRoom(code) {
+  roomCode = code;
+  roomBadge.textContent = `Room: ${roomCode || "—"}`;
+}
+
+function showLoveLetter(letter, code) {
+  if (!letter || !code) return;
+  loveLetter.classList.remove("hidden");
+  loveLetter.innerHTML = `
+    <strong>💌 Love Letter Invite</strong>
+    <p>${letter}</p>
+    <p><strong>Code:</strong> ${code}</p>
+  `;
 }
 
 socket.on("connect", () => {
   connected = true;
-  setStatus("Online multiplayer", "online");
+  setStatus("Connected • pick a mode", "online");
 });
 
 socket.on("connect_error", () => {
-  if (!connected) {
-    setStatus("Offline mode (serverless fallback)", "offline");
-    startOfflineMode();
-  }
+  setStatus("Connection failed", "offline");
+});
+
+socket.on("joinError", ({ message }) => {
+  joinError.textContent = message;
 });
 
 socket.on("init", (data) => {
-  connected = true;
   playerId = data.playerId;
   players = data.players;
   loveItems = data.loveItems;
   scores = data.scores;
+  names = data.names;
+  setRoom(data.roomCode);
   updateScoreboard();
-});
+  joinError.textContent = "";
 
-socket.on("newPlayer", ({ playerId: id, player }) => {
-  players[id] = player;
-});
-
-socket.on("playerMoved", ({ playerId: id, x, y }) => {
-  if (players[id]) {
-    players[id].x = x;
-    players[id].y = y;
+  if (data.letter) {
+    showLoveLetter(data.letter, data.roomCode);
   }
-});
 
-socket.on("playerDisconnected", (id) => {
-  delete players[id];
-  delete scores[id];
-  updateScoreboard();
+  lobby.classList.add("compact");
+  setStatus(data.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
 });
 
 socket.on("gameUpdate", (data) => {
   players = data.players;
   loveItems = data.loveItems;
-});
-
-socket.on("scoreUpdate", ({ playerId: id, score }) => {
-  scores[id] = score;
+  scores = data.scores;
+  names = data.names;
+  if (data.roomCode) setRoom(data.roomCode);
   updateScoreboard();
 });
 
-function startOfflineMode() {
-  if (playerId) return;
+createRoomBtn.addEventListener("click", () => {
+  if (!connected) return;
+  socket.emit("createRoom", { loverName: getLoverName(), withBot: false });
+});
 
-  playerId = localPlayerId;
-  players = {
-    [localPlayerId]: { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, color: "#ff4fa8" },
-    bot: { x: 100, y: 100, color: "#8ec5ff" }
-  };
-  scores = { [localPlayerId]: 0, bot: 0 };
-  loveItems = Array.from({ length: 18 }, (_, i) => ({
-    id: `offline-${Date.now()}-${i}`,
-    x: Math.random() * (WORLD_WIDTH - 30) + 15,
-    y: Math.random() * (WORLD_HEIGHT - 30) + 15,
-    type: Math.floor(Math.random() * 4)
-  }));
+createBotBtn.addEventListener("click", () => {
+  if (!connected) return;
+  socket.emit("createRoom", { loverName: getLoverName(), withBot: true });
+});
 
-  setStatus("Offline mode (serverless fallback)", "offline");
-  updateScoreboard();
-}
+joinRoomBtn.addEventListener("click", () => {
+  if (!connected) return;
+  const code = roomCodeInput.value.toUpperCase().trim();
+  socket.emit("joinRoom", { loverName: getLoverName(), roomCode: code });
+});
 
 function updateScoreboard() {
   const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
   scoresElement.innerHTML = "";
 
   sorted.forEach(([id, score], index) => {
-    const scoreElement = document.createElement("div");
-    scoreElement.className = "score-row";
+    const row = document.createElement("div");
     const isYou = id === playerId;
-    scoreElement.innerHTML = `
-      <span>${index + 1}. ${isYou ? "You" : `Player ${id.slice(0, 4)}`}</span>
+    row.className = `score-row ${isYou ? "is-you" : ""}`;
+    row.innerHTML = `
+      <span>${index + 1}. ${isYou ? "You" : names[id] || "Lover"}</span>
       <strong>${score}</strong>
     `;
-
     if (isYou) {
-      scoreElement.classList.add("is-you");
-      scoreElement.style.borderColor = players[id]?.color || "#fff";
+      row.style.borderColor = players[id]?.color || "#fff";
     }
-
-    scoresElement.appendChild(scoreElement);
+    scoresElement.appendChild(row);
   });
 }
 
@@ -142,9 +150,7 @@ document.addEventListener("keydown", (event) => {
 
 document.addEventListener("keyup", (event) => {
   const direction = keyMap[event.code];
-  if (direction) {
-    keys.delete(direction);
-  }
+  if (direction) keys.delete(direction);
 });
 
 if (window.matchMedia("(pointer: coarse)").matches) {
@@ -153,13 +159,11 @@ if (window.matchMedia("(pointer: coarse)").matches) {
 
 touchPad.querySelectorAll("button").forEach((button) => {
   const direction = button.dataset.dir;
-
   const press = (event) => {
     event.preventDefault();
     keys.add(direction);
     button.classList.add("active");
   };
-
   const release = (event) => {
     event.preventDefault();
     keys.delete(direction);
@@ -176,25 +180,22 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function updatePlayerPosition() {
+function moveSelf() {
   if (!playerId || !players[playerId]) return;
+  const me = players[playerId];
+  const speed = 4.8;
 
-  const speed = 5;
-  const player = players[playerId];
-  if (keys.has("left")) player.x -= speed;
-  if (keys.has("right")) player.x += speed;
-  if (keys.has("up")) player.y -= speed;
-  if (keys.has("down")) player.y += speed;
+  if (keys.has("left")) me.x -= speed;
+  if (keys.has("right")) me.x += speed;
+  if (keys.has("up")) me.y -= speed;
+  if (keys.has("down")) me.y += speed;
 
-  player.x = clamp(player.x, 15, WORLD_WIDTH - 15);
-  player.y = clamp(player.y, 15, WORLD_HEIGHT - 15);
-
-  if (connected) {
-    socket.emit("move", { x: player.x, y: player.y });
-  }
+  me.x = clamp(me.x, 15, WORLD_WIDTH - 15);
+  me.y = clamp(me.y, 15, WORLD_HEIGHT - 15);
+  socket.emit("move", { x: me.x, y: me.y });
 }
 
-function drawHeart(x, y, size, color, glow = 0.5) {
+function drawHeart(x, y, size, color, glow = 0.9) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(size / 40, size / 40);
@@ -212,55 +213,13 @@ function drawHeart(x, y, size, color, glow = 0.5) {
   ctx.restore();
 }
 
-function getLoveColor(type) {
+function loveColor(type) {
   return ["#ff4fa8", "#ff79c8", "#ffd0ec", "#9d7aff"][type] || "#ff4fa8";
 }
 
-function updateOfflineWorld() {
-  if (connected || !players.bot) return;
-
-  const bot = players.bot;
-  const nearest = loveItems.reduce((best, item) => {
-    const d = (item.x - bot.x) ** 2 + (item.y - bot.y) ** 2;
-    return d < best.distance ? { item, distance: d } : best;
-  }, { item: null, distance: Infinity }).item;
-
-  if (nearest) {
-    bot.x += Math.sign(nearest.x - bot.x) * 1.8;
-    bot.y += Math.sign(nearest.y - bot.y) * 1.8;
-  }
-
-  [playerId, "bot"].forEach((id) => {
-    const p = players[id];
-    if (!p) return;
-    loveItems.forEach((item, index) => {
-      const hit = Math.hypot(p.x - item.x, p.y - item.y) < 25;
-      if (hit) {
-        scores[id] = (scores[id] || 0) + (id === playerId ? Math.max(1, combo) : 1);
-
-        if (id === playerId) {
-          combo += 1;
-          clearTimeout(comboTimeout);
-          comboTimeout = setTimeout(() => (combo = 0), 2300);
-        }
-
-        loveItems.splice(index, 1);
-        loveItems.push({
-          id: `offline-${Date.now()}-${Math.random()}`,
-          x: Math.random() * (WORLD_WIDTH - 30) + 15,
-          y: Math.random() * (WORLD_HEIGHT - 30) + 15,
-          type: Math.floor(Math.random() * 4)
-        });
-        updateScoreboard();
-      }
-    });
-  });
-}
-
 function resizeCanvas() {
-  const wrap = canvas.parentElement;
-  const availableWidth = wrap.clientWidth;
-  scale = Math.min(1, availableWidth / WORLD_WIDTH);
+  const available = canvas.parentElement.clientWidth;
+  const scale = Math.min(1, available / WORLD_WIDTH);
   canvas.style.width = `${WORLD_WIDTH * scale}px`;
   canvas.style.height = `${WORLD_HEIGHT * scale}px`;
 }
@@ -274,40 +233,32 @@ function drawBackground() {
   gradient.addColorStop(1, "#32184b");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-
-  for (let i = 0; i < 24; i += 1) {
-    const t = performance.now() / 1300 + i;
-    ctx.fillStyle = `rgba(255,255,255,${0.03 + (i % 5) * 0.01})`;
-    ctx.beginPath();
-    ctx.arc((Math.sin(t) * 0.5 + 0.5) * WORLD_WIDTH, (Math.cos(t * 1.3) * 0.5 + 0.5) * WORLD_HEIGHT, 1.6 + (i % 3), 0, Math.PI * 2);
-    ctx.fill();
-  }
 }
 
 function draw() {
   drawBackground();
 
   loveItems.forEach((item) => {
-    drawHeart(item.x, item.y, 18, getLoveColor(item.type), 0.9);
+    drawHeart(item.x, item.y, 18, loveColor(item.type), 0.7);
   });
 
   Object.entries(players).forEach(([id, player]) => {
-    drawHeart(player.x, player.y, id === playerId ? 36 : 30, player.color, id === playerId ? 1 : 0.7);
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    const mine = id === playerId;
+    drawHeart(player.x, player.y, mine ? 36 : 31, player.color, mine ? 1 : 0.8);
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
     ctx.font = "600 12px Inter, Arial";
-    ctx.fillText(id === playerId ? "You" : id.slice(0, 4), player.x - 12, player.y - 24);
+    ctx.fillText(mine ? "You" : (names[id] || "Lover"), player.x - 14, player.y - 24);
   });
 
-  if (!connected && playerId) {
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.font = "700 16px Inter, Arial";
-    ctx.fillText(`Combo x${Math.max(combo, 1)}`, 16, 28);
+  if (!playerId) {
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "700 20px Inter, Arial";
+    ctx.fillText("Create or join a love room to start", 260, 300);
   }
 }
 
 function gameLoop() {
-  updatePlayerPosition();
-  updateOfflineWorld();
+  moveSelf();
   draw();
   requestAnimationFrame(gameLoop);
 }
