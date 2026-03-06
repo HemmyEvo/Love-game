@@ -4,16 +4,22 @@ const scoresElement = document.getElementById("scores");
 const statusPill = document.getElementById("statusPill");
 const roomBadge = document.getElementById("roomBadge");
 const touchPad = document.getElementById("touchPad");
+const joystick = document.getElementById("joystick");
+const joystickKnob = document.getElementById("joystickKnob");
 const lobby = document.getElementById("lobby");
 const joinError = document.getElementById("joinError");
 const loveLetter = document.getElementById("loveLetter");
-const gyroBtn = document.getElementById("gyroBtn");
 
 const createRoomBtn = document.getElementById("createRoomBtn");
 const createBotBtn = document.getElementById("createBotBtn");
 const joinRoomBtn = document.getElementById("joinRoomBtn");
 const loverNameInput = document.getElementById("loverName");
 const roomCodeInput = document.getElementById("roomCodeInput");
+
+const inviteOverlay = document.getElementById("inviteOverlay");
+const incomingCodeElement = document.getElementById("incomingCode");
+const copyIncomingCodeBtn = document.getElementById("copyIncomingCodeBtn");
+const useIncomingCodeBtn = document.getElementById("useIncomingCodeBtn");
 
 const WORLD_WIDTH = 960;
 const WORLD_HEIGHT = 600;
@@ -27,16 +33,18 @@ let loveItems = [];
 let scores = {};
 let names = {};
 let connected = false;
+let socketReady = false;
 
-let gyroEnabled = false;
-let gyroAxes = { x: 0, y: 0 };
+const joystickState = { x: 0, y: 0, active: false };
 
 const socket = io(window.location.origin, {
   path: "/socket.io",
   reconnection: true,
   reconnectionAttempts: Infinity,
-  reconnectionDelay: 500,
-  timeout: 10000
+  reconnectionDelay: 600,
+  reconnectionDelayMax: 4000,
+  timeout: 10000,
+  autoConnect: true
 });
 
 function setStatus(text, state = "offline") {
@@ -53,19 +61,84 @@ function setRoom(code) {
   roomBadge.textContent = `Room: ${roomCode || "—"}`;
 }
 
-function showLoveLetter(letter, code) {
+function safeEmit(eventName, payload) {
+  if (!socket.connected) return;
+  socket.emit(eventName, payload);
+}
+
+function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  const temp = document.createElement("textarea");
+  temp.value = text;
+  document.body.appendChild(temp);
+  temp.select();
+  document.execCommand("copy");
+  temp.remove();
+  return Promise.resolve();
+}
+
+function openInviteOverlay(code) {
+  if (!code) return;
+  incomingCodeElement.textContent = code;
+  inviteOverlay.classList.remove("hidden");
+  inviteOverlay.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => {
+    inviteOverlay.classList.add("open");
+  });
+}
+
+function closeInviteOverlay() {
+  inviteOverlay.classList.remove("open");
+  inviteOverlay.setAttribute("aria-hidden", "true");
+  setTimeout(() => inviteOverlay.classList.add("hidden"), 220);
+}
+
+function renderInvite(letter, code) {
   if (!letter || !code) return;
+  const inviteUrl = `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(code)}`;
   loveLetter.classList.remove("hidden");
   loveLetter.innerHTML = `
-    <strong>💌 Love Letter Invite</strong>
+    <strong>💌 Share Invite</strong>
     <p>${letter}</p>
     <p><strong>Code:</strong> ${code}</p>
+    <div class="invite-row">
+      <button id="copyInviteBtn">Copy Invite</button>
+      <button id="shareWhatsAppBtn">Share to WhatsApp</button>
+    </div>
   `;
+
+  document.getElementById("copyInviteBtn").addEventListener("click", async () => {
+    await copyText(`Love Rush invite: ${code} ${inviteUrl}`);
+  });
+
+  document.getElementById("shareWhatsAppBtn").addEventListener("click", () => {
+    const text = `Love Rush invite 💌%0ARoom code: ${encodeURIComponent(code)}%0A${encodeURIComponent(inviteUrl)}`;
+    window.open(`https://wa.me/?text=${text}`, "_blank", "noopener,noreferrer");
+  });
 }
 
 socket.on("connect", () => {
   connected = true;
-  setStatus("Connected • pick mode", "online");
+  socketReady = true;
+  setStatus("Connected", "online");
+});
+
+socket.on("disconnect", (reason) => {
+  connected = false;
+  socketReady = false;
+  setStatus(`Disconnected (${reason})`, "offline");
+});
+
+socket.io.on("reconnect_attempt", () => {
+  setStatus("Reconnecting…", "offline");
+});
+
+socket.io.on("reconnect", () => {
+  connected = true;
+  socketReady = true;
+  setStatus("Reconnected", "online");
 });
 
 socket.on("disconnect", () => {
@@ -84,6 +157,7 @@ socket.io.on("reconnect", () => {
 
 socket.on("connect_error", () => {
   connected = false;
+  socketReady = false;
   setStatus("Connection failed", "offline");
 });
 
@@ -101,35 +175,35 @@ socket.on("init", (data) => {
   updateScoreboard();
   joinError.textContent = "";
 
-  if (data.letter) showLoveLetter(data.letter, data.roomCode);
+  if (data.letter) renderInvite(data.letter, data.roomCode);
 
   lobby.classList.add("compact");
   setStatus(data.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
 });
 
 socket.on("gameUpdate", (data) => {
-  players = data.players;
-  loveItems = data.loveItems;
-  scores = data.scores;
-  names = data.names;
+  players = data.players || {};
+  loveItems = data.loveItems || [];
+  scores = data.scores || {};
+  names = data.names || {};
   if (data.roomCode) setRoom(data.roomCode);
   updateScoreboard();
 });
 
 createRoomBtn.addEventListener("click", () => {
   if (!connected) return;
-  socket.emit("createRoom", { loverName: getLoverName(), withBot: false });
+  safeEmit("createRoom", { loverName: getLoverName(), withBot: false });
 });
 
 createBotBtn.addEventListener("click", () => {
   if (!connected) return;
-  socket.emit("createRoom", { loverName: getLoverName(), withBot: true });
+  safeEmit("createRoom", { loverName: getLoverName(), withBot: true });
 });
 
 joinRoomBtn.addEventListener("click", () => {
   if (!connected) return;
   const code = roomCodeInput.value.toUpperCase().trim();
-  socket.emit("joinRoom", { loverName: getLoverName(), roomCode: code });
+  safeEmit("joinRoom", { loverName: getLoverName(), roomCode: code });
 });
 
 function updateScoreboard() {
@@ -140,10 +214,7 @@ function updateScoreboard() {
     const row = document.createElement("div");
     const isYou = id === playerId;
     row.className = `score-row ${isYou ? "is-you" : ""}`;
-    row.innerHTML = `
-      <span>${index + 1}. ${isYou ? "You" : names[id] || "Lover"}</span>
-      <strong>${score}</strong>
-    `;
+    row.innerHTML = `<span>${index + 1}. ${isYou ? "You" : names[id] || "Lover"}</span><strong>${score}</strong>`;
     scoresElement.appendChild(row);
   });
 }
@@ -173,93 +244,79 @@ document.addEventListener("keyup", (event) => {
   if (direction) keys.delete(direction);
 });
 
-if (window.matchMedia("(pointer: coarse)").matches) {
-  touchPad.classList.add("visible");
-}
-
-touchPad.querySelectorAll("button").forEach((button) => {
-  const direction = button.dataset.dir;
-  const press = (event) => {
-    event.preventDefault();
-    keys.add(direction);
-    button.classList.add("active");
-  };
-  const release = (event) => {
-    event.preventDefault();
-    keys.delete(direction);
-    button.classList.remove("active");
-  };
-
-  button.addEventListener("pointerdown", press);
-  button.addEventListener("pointerup", release);
-  button.addEventListener("pointercancel", release);
-  button.addEventListener("pointerleave", release);
-});
-
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function handleDeviceOrientation(event) {
-  const tiltLeftRight = event.gamma || 0;
-  const tiltFrontBack = event.beta || 0;
-
-  if (window.matchMedia("(orientation: portrait)").matches) {
-    gyroAxes.x = clamp(tiltLeftRight / 25, -1, 1);
-    gyroAxes.y = clamp(tiltFrontBack / 35, -1, 1);
-  } else {
-    gyroAxes.x = clamp(tiltFrontBack / 35, -1, 1);
-    gyroAxes.y = clamp(-tiltLeftRight / 25, -1, 1);
-  }
+function resetJoystick() {
+  joystickState.x = 0;
+  joystickState.y = 0;
+  joystickState.active = false;
+  joystickKnob.style.left = "50%";
+  joystickKnob.style.top = "50%";
 }
 
-async function enableGyroscope() {
-  if (!("DeviceOrientationEvent" in window)) {
-    gyroBtn.textContent = "Gyroscope not supported";
-    return;
+function moveJoystick(clientX, clientY) {
+  const rect = joystick.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const maxRadius = rect.width * 0.3;
+
+  let dx = clientX - cx;
+  let dy = clientY - cy;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist > maxRadius) {
+    const ratio = maxRadius / dist;
+    dx *= ratio;
+    dy *= ratio;
   }
 
-  try {
-    if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      const result = await DeviceOrientationEvent.requestPermission();
-      if (result !== "granted") {
-        gyroBtn.textContent = "Gyroscope blocked";
-        return;
-      }
-    }
+  joystickState.x = clamp(dx / maxRadius, -1, 1);
+  joystickState.y = clamp(dy / maxRadius, -1, 1);
+  joystickState.active = true;
 
-    window.addEventListener("deviceorientation", handleDeviceOrientation);
-    gyroEnabled = true;
-    gyroBtn.textContent = "Gyroscope Enabled";
-  } catch (_error) {
-    gyroBtn.textContent = "Gyroscope unavailable";
-  }
+  joystickKnob.style.left = `${50 + joystickState.x * 30}%`;
+  joystickKnob.style.top = `${50 + joystickState.y * 30}%`;
 }
 
-gyroBtn.addEventListener("click", enableGyroscope);
+if (window.matchMedia("(pointer: coarse)").matches) {
+  touchPad.classList.add("visible");
+}
+
+joystick.addEventListener("pointerdown", (event) => {
+  joystick.setPointerCapture(event.pointerId);
+  moveJoystick(event.clientX, event.clientY);
+});
+
+joystick.addEventListener("pointermove", (event) => {
+  if (!joystickState.active) return;
+  moveJoystick(event.clientX, event.clientY);
+});
+
+["pointerup", "pointercancel", "pointerleave"].forEach((eventName) => {
+  joystick.addEventListener(eventName, resetJoystick);
+});
 
 function moveSelf() {
   if (!playerId || !players[playerId]) return;
 
   const me = players[playerId];
-  const speed = 4.8;
-  let vx = 0;
-  let vy = 0;
+  const speed = 4.7;
+  let vx = joystickState.x;
+  let vy = joystickState.y;
 
   if (keys.has("left")) vx -= 1;
   if (keys.has("right")) vx += 1;
   if (keys.has("up")) vy -= 1;
   if (keys.has("down")) vy += 1;
 
-  if (gyroEnabled) {
-    vx += gyroAxes.x;
-    vy += gyroAxes.y;
+  me.x = clamp(me.x + clamp(vx, -1, 1) * speed, 15, WORLD_WIDTH - 15);
+  me.y = clamp(me.y + clamp(vy, -1, 1) * speed, 15, WORLD_HEIGHT - 15);
+
+  if (socketReady) {
+    safeEmit("move", { x: me.x, y: me.y });
   }
-
-  me.x = clamp(me.x + vx * speed, 15, WORLD_WIDTH - 15);
-  me.y = clamp(me.y + vy * speed, 15, WORLD_HEIGHT - 15);
-
-  socket.emit("move", { x: me.x, y: me.y });
 }
 
 function drawHeart(x, y, size, color, glow = 0.9) {
@@ -274,7 +331,7 @@ function drawHeart(x, y, size, color, glow = 0.9) {
   ctx.bezierCurveTo(20, -6, 0, -6, 0, 10);
   ctx.closePath();
   ctx.shadowColor = color;
-  ctx.shadowBlur = 14 * glow;
+  ctx.shadowBlur = 12 * glow;
   ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
@@ -295,10 +352,7 @@ window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 
 function drawBackground() {
-  const gradient = ctx.createLinearGradient(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-  gradient.addColorStop(0, "#090909");
-  gradient.addColorStop(1, "#151515");
-  ctx.fillStyle = gradient;
+  ctx.fillStyle = "#0b0b0b";
   ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 }
 
@@ -320,7 +374,7 @@ function draw() {
   if (!playerId) {
     ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.font = "700 20px Inter, Arial";
-    ctx.fillText("Create or join a love room to start", 250, 300);
+    ctx.fillText("Create or join a room to start", 275, 300);
   }
 }
 
@@ -331,3 +385,24 @@ function gameLoop() {
 }
 
 gameLoop();
+
+const inviteCode = new URLSearchParams(window.location.search).get("invite");
+if (inviteCode) {
+  const code = inviteCode.toUpperCase().trim().slice(0, 6);
+  roomCodeInput.value = code;
+  openInviteOverlay(code);
+}
+
+copyIncomingCodeBtn.addEventListener("click", async () => {
+  await copyText(incomingCodeElement.textContent);
+});
+
+useIncomingCodeBtn.addEventListener("click", () => {
+  roomCodeInput.value = incomingCodeElement.textContent;
+  closeInviteOverlay();
+  roomCodeInput.focus();
+});
+
+inviteOverlay.addEventListener("click", (event) => {
+  if (event.target === inviteOverlay) closeInviteOverlay();
+});
