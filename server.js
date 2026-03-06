@@ -6,7 +6,9 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { origin: "*" },
+  pingInterval: 10000,
+  pingTimeout: 30000
 });
 
 const publicDir = path.join(__dirname, "Public");
@@ -35,6 +37,8 @@ const WORLD_HEIGHT = 600;
 const ITEM_COUNT = 22;
 const BOT_PREFIX = "bot-";
 const INVITE_CODE_LENGTH = 8;
+const SIMULATION_FPS = 60;
+const BROADCAST_FPS = 20;
 
 const rooms = {};
 const socketToRoom = {};
@@ -100,8 +104,9 @@ function ensureBot(room) {
   room.names[botId] = "Cupid Bot";
 }
 
-function emitRoomState(room, event = "gameUpdate") {
-  io.to(room.code).emit(event, {
+function emitRoomState(room, event = "gameUpdate", { volatile = false } = {}) {
+  const channel = volatile ? io.to(room.code).volatile : io.to(room.code);
+  channel.emit(event, {
     roomCode: room.code,
     players: room.players,
     loveItems: room.loveItems,
@@ -240,13 +245,18 @@ io.on("connection", (socket) => {
   });
 });
 
-const gameLoop = setInterval(() => {
+const simulationLoop = setInterval(() => {
   Object.values(rooms).forEach((room) => {
     if (room.mode === "bot-duo") botStep(room);
     runCollisions(room);
-    emitRoomState(room, "gameUpdate");
   });
-}, 1000 / 60);
+}, 1000 / SIMULATION_FPS);
+
+const broadcastLoop = setInterval(() => {
+  Object.values(rooms).forEach((room) => {
+    emitRoomState(room, "gameUpdate", { volatile: true });
+  });
+}, 1000 / BROADCAST_FPS);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
@@ -254,6 +264,7 @@ server.listen(PORT, () => {
 });
 
 process.on("SIGTERM", () => {
-  clearInterval(gameLoop);
+  clearInterval(simulationLoop);
+  clearInterval(broadcastLoop);
   server.close();
 });
