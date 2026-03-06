@@ -251,7 +251,8 @@ function renderPregameInfo(data = {}) {
   pregamePanel.classList.remove("hidden");
   const votes = data.maxScoreVotes || {};
   const readyPlayers = data.readyPlayers || {};
-  const partnerId = Object.keys(names).find((id) => id !== playerId && id !== "bot-player");
+  const humanIds = Object.keys(names).filter((id) => id !== "bot-player");
+  const partnerId = humanIds.find((id) => id !== playerId);
   const myVote = votes[playerId] || targetScore;
   const partnerVote = partnerId ? votes[partnerId] : null;
   const partnerReady = partnerId ? Boolean(readyPlayers[partnerId]) : false;
@@ -267,10 +268,15 @@ function renderPregameInfo(data = {}) {
     readyBtn.textContent = `Ready with ${myVote}`;
     readyBtn.disabled = false;
 
-    const shouldShowSetupModal = Boolean(data.promptScoreSetup && data.promptScoreSetupFor === playerId);
+    const shouldShowSetupModal = humanIds.length >= 2;
     if (shouldShowSetupModal && !hasShownSetupModal) {
       hasShownSetupModal = true;
       openMatchSetupModal();
+    }
+
+    if (!shouldShowSetupModal) {
+      hasShownSetupModal = false;
+      closeMatchSetupModal();
     }
   }
 
