@@ -514,9 +514,7 @@ export const leaveRoom = mutation({
     delete readyPlayers[args.playerId];
     delete playAgainVotes[args.playerId];
 
-    const presence = await getPresenceDoc(ctx, roomCode, args.playerId);
-    if (presence) await ctx.db.delete(presence._id);
-
+  
     const presence = await getPresenceDoc(ctx, roomCode, args.playerId);
     if (presence) await ctx.db.delete(presence._id);
 
