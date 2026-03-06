@@ -56,6 +56,7 @@ let isGameOver = false;
 let winnerId = null;
 let pollTimer = null;
 let hasShownResultModal = false;
+let hasShownSetupModal = false;
 
 const REALTIME_PROVIDER = "convex";
 const CONVEX_PROXY_URL = "/api/convex";
@@ -473,6 +474,7 @@ createRoomBtn.addEventListener("click", async () => {
     });
 
     hasShownResultModal = false;
+    hasShownSetupModal = false;
     resultModal.classList.add("hidden");
     resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(data);
@@ -494,6 +496,7 @@ createRoomBtn.addEventListener("click", async () => {
 createBotBtn.addEventListener("click", async () => {
   await leaveCurrentRoom();
   hasShownResultModal = false;
+  hasShownSetupModal = false;
   resultModal.classList.add("hidden");
   resultModal.setAttribute("aria-hidden", "true");
   startOfflineMode();
@@ -807,6 +810,7 @@ async function maybeShowInvitationOverlay() {
     });
 
     hasShownResultModal = false;
+    hasShownSetupModal = false;
     resultModal.classList.add("hidden");
     resultModal.setAttribute("aria-hidden", "true");
     applyRoomState(joined);
