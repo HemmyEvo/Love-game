@@ -251,7 +251,7 @@ canvas {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.66);
-  display: grid;
+  display: none;
   place-items: center;
   z-index: 40;
   padding: 16px;
