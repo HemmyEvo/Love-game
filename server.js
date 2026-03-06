@@ -1,3 +1,4 @@
+const path = require("path");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -10,7 +11,12 @@ const io = new Server(server, {
   }
 });
 
-app.use(express.static("Public"));
+const publicDir = path.join(__dirname, "Public");
+app.use(express.static(publicDir));
+
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(publicDir, "index.html"));
+});
 
 const WORLD_WIDTH = 960;
 const WORLD_HEIGHT = 600;
