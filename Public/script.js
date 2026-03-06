@@ -35,10 +35,14 @@ let names = {};
 let connected = false;
 let socketReady = false;
 let pendingRoomCreation = false;
-const invitedCodeFromLink = (new URLSearchParams(window.location.search).get("invite") || "")
+const urlParams = new URLSearchParams(window.location.search);
+const invitedRoomCodeFromLink = (urlParams.get("room") || "")
   .toUpperCase()
   .trim()
   .slice(0, 6);
+const inviteTokenFromLink = (urlParams.get("invite") || "")
+  .toUpperCase()
+  .trim();
 
 const joystickState = { x: 0, y: 0, active: false };
 
@@ -87,7 +91,6 @@ function copyText(text) {
 function openInviteOverlay(code) {
   if (!code) return;
   incomingCodeElement.textContent = code;
-  inviteOverlay.classList.remove("hidden");
   inviteOverlay.classList.remove("open");
   inviteOverlay.setAttribute("aria-hidden", "false");
   void inviteOverlay.offsetWidth;
@@ -99,12 +102,11 @@ function openInviteOverlay(code) {
 function closeInviteOverlay() {
   inviteOverlay.classList.remove("open");
   inviteOverlay.setAttribute("aria-hidden", "true");
-  setTimeout(() => inviteOverlay.classList.add("hidden"), 760);
 }
 
-function renderInvite(letter, code) {
-  if (!letter || !code) return;
-  const inviteUrl = `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(code)}`;
+function renderInvite(letter, code, inviteCode) {
+  if (!letter || !code || !inviteCode) return;
+  const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(code)}&invite=${encodeURIComponent(inviteCode)}`;
   loveLetter.classList.remove("hidden");
   loveLetter.innerHTML = `
     <strong>💌 Share Invite</strong>
@@ -168,7 +170,9 @@ socket.on("init", (data) => {
   updateScoreboard();
   joinError.textContent = "";
 
-  if (pendingRoomCreation && data.letter) renderInvite(data.letter, data.roomCode);
+  if (pendingRoomCreation && data.letter && data.inviteCode) {
+    renderInvite(data.letter, data.roomCode, data.inviteCode);
+  }
   pendingRoomCreation = false;
 
   lobby.classList.add("compact");
@@ -383,10 +387,24 @@ function gameLoop() {
 
 gameLoop();
 
-if (invitedCodeFromLink) {
-  roomCodeInput.value = invitedCodeFromLink;
-  openInviteOverlay(invitedCodeFromLink);
+async function maybeShowInvitationOverlay() {
+  if (!invitedRoomCodeFromLink || !inviteTokenFromLink) return;
+
+  try {
+    const response = await fetch(`/api/invitation?roomCode=${encodeURIComponent(invitedRoomCodeFromLink)}&inviteCode=${encodeURIComponent(inviteTokenFromLink)}`);
+    if (!response.ok) return;
+
+    const data = await response.json();
+    if (!data.invited || !data.roomCode) return;
+
+    roomCodeInput.value = data.roomCode;
+    openInviteOverlay(data.roomCode);
+  } catch (_error) {
+    // Fail silently if invitation check is temporarily unavailable.
+  }
 }
+
+maybeShowInvitationOverlay();
 
 copyIncomingCodeBtn.addEventListener("click", async () => {
   await copyText(incomingCodeElement.textContent);

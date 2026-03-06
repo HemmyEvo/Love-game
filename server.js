@@ -15,10 +15,26 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
+app.get("/api/invitation", (req, res) => {
+  const roomCodeFromQuery = String(req.query.roomCode || "").toUpperCase().trim();
+  const inviteCodeFromQuery = String(req.query.inviteCode || "").toUpperCase().trim();
+  const room = rooms[roomCodeFromQuery];
+
+  const invited = Boolean(
+    room
+    && room.inviteCode
+    && inviteCodeFromQuery
+    && room.inviteCode === inviteCodeFromQuery
+  );
+
+  res.json({ invited, roomCode: invited ? room.code : null });
+});
+
 const WORLD_WIDTH = 960;
 const WORLD_HEIGHT = 600;
 const ITEM_COUNT = 22;
 const BOT_PREFIX = "bot-";
+const INVITE_CODE_LENGTH = 8;
 
 const rooms = {};
 const socketToRoom = {};
@@ -30,6 +46,10 @@ function roomCode() {
     code += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
   return code;
+}
+
+function inviteCode() {
+  return Math.random().toString(36).slice(2, 2 + INVITE_CODE_LENGTH).toUpperCase();
 }
 
 function createLoveItem(seed = 0) {
@@ -50,6 +70,7 @@ function createRoom(mode = "duo") {
   const loveItems = Array.from({ length: ITEM_COUNT }, (_, index) => createLoveItem(index));
   rooms[code] = {
     code,
+    inviteCode: inviteCode(),
     mode,
     players: {},
     scores: {},
@@ -154,7 +175,8 @@ io.on("connection", (socket) => {
       scores: room.scores,
       names: room.names,
       mode: room.mode,
-      letter: room.letter
+      letter: room.letter,
+      inviteCode: room.inviteCode
     });
 
     emitRoomState(room, "gameUpdate");
@@ -187,7 +209,8 @@ io.on("connection", (socket) => {
       scores: room.scores,
       names: room.names,
       mode: room.mode,
-      letter: room.letter
+      letter: room.letter,
+      inviteCode: room.inviteCode
     });
 
     emitRoomState(room, "gameUpdate");
