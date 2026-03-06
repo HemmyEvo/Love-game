@@ -52,6 +52,18 @@ const CONVEX_FUNCTIONS = {
   validateInvitation: "game:validateInvitation",
 };
 
+const REQUIRED_CONVEX_FUNCTION_PATHS = ["game:getRoomState", "game:createRoom"];
+const configuredConvexFunctionPaths = new Set(Object.values(CONVEX_FUNCTIONS));
+const missingRequiredConvexFunctions = REQUIRED_CONVEX_FUNCTION_PATHS.filter(
+  (path) => !configuredConvexFunctionPaths.has(path)
+);
+
+if (missingRequiredConvexFunctions.length) {
+  throw new Error(
+    `Missing required Convex functions: ${missingRequiredConvexFunctions.join(", ")}`
+  );
+}
+
 const DEVICE_ID_KEY = "love-rush-device-id";
 const localDeviceId = (() => {
   const existing = localStorage.getItem(DEVICE_ID_KEY);
