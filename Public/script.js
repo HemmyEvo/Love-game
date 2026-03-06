@@ -141,6 +141,20 @@ socket.io.on("reconnect", () => {
   setStatus("Reconnected", "online");
 });
 
+socket.on("disconnect", () => {
+  connected = false;
+  setStatus("Disconnected • retrying…", "offline");
+});
+
+socket.io.on("reconnect_attempt", () => {
+  setStatus("Reconnecting…", "offline");
+});
+
+socket.io.on("reconnect", () => {
+  connected = true;
+  setStatus(roomCode ? "Reconnected" : "Connected • pick mode", "online");
+});
+
 socket.on("connect_error", () => {
   connected = false;
   socketReady = false;
