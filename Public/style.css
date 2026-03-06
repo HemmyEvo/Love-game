@@ -251,10 +251,15 @@ canvas {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.66);
-  display: none;
+  display: grid;
   place-items: center;
   z-index: 40;
   padding: 16px;
+  opacity: 1;
+}
+.result-modal.hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 .result-card {
   width: min(420px, 100%);
@@ -292,4 +297,16 @@ canvas {
 .setup-actions {
   display: grid;
   gap: 8px;
+}
+
+
+.result-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.result-actions .ghost {
+  background: transparent;
+  color: #4f1f36;
+  border-color: #4f1f36;
 }
