@@ -2,68 +2,74 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Love Rush Arena</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="glass panel hero">
-      <h1>🖤 Love Rush Arena</h1>
-      <p>Black, white, and a red pulse — invite your partner with a love-letter code.</p>
+  <div class="app">
+    <header class="topbar card">
+      <div>
+        <h1>🖤 Love Rush Arena</h1>
+        <p>Fast duo hearts battle, built for phones first.</p>
+      </div>
+      <div class="status-wrap">
+        <div id="statusPill" class="status-pill" data-state="offline">Connecting…</div>
+        <div id="roomBadge" class="room-badge">Room: —</div>
+      </div>
     </header>
 
-    <section id="lobby" class="glass panel lobby">
-      <h2>Choose your duo mode</h2>
-      <div class="lobby-form">
-        <input id="loverName" type="text" maxlength="20" placeholder="Your name" />
-        <div class="actions">
-          <button id="createRoomBtn">Create Duo Room</button>
-          <button id="createBotBtn">Play with Cupid Bot</button>
-        </div>
-        <div class="join-row">
-          <input id="roomCodeInput" type="text" maxlength="6" placeholder="Love code" />
-          <button id="joinRoomBtn">Join by Code</button>
-        </div>
+    <section id="lobby" class="card lobby">
+      <h2>Start a match</h2>
+      <input id="loverName" type="text" maxlength="20" placeholder="Your name" />
+      <div class="actions">
+        <button id="createRoomBtn">Create Duo Room</button>
+        <button id="createBotBtn">Play vs Cupid Bot</button>
+      </div>
+      <div class="join-row">
+        <input id="roomCodeInput" type="text" maxlength="6" placeholder="Enter code" />
+        <button id="joinRoomBtn">Join</button>
       </div>
       <p id="joinError" class="error"></p>
-      <div id="loveLetter" class="love-letter hidden"></div>
+
+      <div id="loveLetter" class="invite hidden"></div>
     </section>
 
-    <section class="hud-grid">
-      <div class="glass panel info-panel">
-        <h2>How to play</h2>
-        <ul>
-          <li>⌨️ Arrow Keys / WASD</li>
-          <li>📱 Touch controls on mobile</li>
-          <li>🧭 Gyroscope control in portrait mode</li>
-          <li>💌 Share your love code</li>
-        </ul>
-        <button id="gyroBtn" class="gyro-btn">Enable Gyroscope</button>
-      </div>
-
-      <div class="glass panel score-panel">
-        <h2>Live Scoreboard</h2>
-        <div id="statusPill" class="status-pill">Connecting…</div>
-        <div id="roomBadge" class="room-badge">Room: —</div>
-        <div id="scores"></div>
-      </div>
-    </section>
-
-    <main class="glass panel game-panel">
+    <main class="game card">
       <div class="canvas-wrap">
         <canvas id="gameCanvas" width="960" height="600"></canvas>
       </div>
+    </main>
 
-      <div id="touchPad" class="touch-pad" aria-label="Touch controls">
-        <button data-dir="up">▲</button>
-        <div class="middle-row">
-          <button data-dir="left">◀</button>
-          <button data-dir="down">▼</button>
-          <button data-dir="right">▶</button>
+    <section class="bottom-grid">
+      <section class="card score-panel">
+        <h3>Live Scoreboard</h3>
+        <div id="scores"></div>
+      </section>
+
+      <section id="touchPad" class="card joystick-panel" aria-label="Joystick control">
+        <h3>Move</h3>
+        <div id="joystick" class="joystick" role="application" aria-label="Touch joystick">
+          <div class="joystick-ring"></div>
+          <div id="joystickKnob" class="joystick-knob"></div>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  <div id="inviteOverlay" class="invite-overlay hidden" aria-hidden="true">
+    <div class="invite-letter" id="inviteLetter">
+      <div class="letter-flap"></div>
+      <div class="letter-paper">
+        <h3>💌 Invitation Received</h3>
+        <p>Your partner invited you to Love Rush Arena.</p>
+        <p>Room Code: <strong id="incomingCode">------</strong></p>
+        <div class="letter-actions">
+          <button id="copyIncomingCodeBtn">Copy Code</button>
+          <button id="useIncomingCodeBtn">Use Code</button>
         </div>
       </div>
-    </main>
+    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
