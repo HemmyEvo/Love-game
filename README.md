@@ -14,7 +14,7 @@ When creating a room, the creator can set a **target score** (first to N wins).
 
 ## Realtime provider notes
 
-Current realtime transport uses **Socket.IO**.
+Current realtime provider is set to **Convex mode** in the client, using the existing Socket.IO bridge transport.
 
 If you want to migrate to Convex later, edit these placeholders in `Public/script.js`:
 
