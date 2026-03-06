@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Love Rush Arena</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="glass panel hero">
+      <h1>💗 Love Rush Arena</h1>
+      <p>Collect hearts, chain combos, and top the love leaderboard.</p>
+    </header>
+
+    <section class="hud-grid">
+      <div class="glass panel info-panel">
+        <h2>How to play</h2>
+        <ul>
+          <li>⌨️ Move with <strong>Arrow Keys</strong> or <strong>WASD</strong>.</li>
+          <li>📱 On touch devices, use the on-screen joypad.</li>
+          <li>✨ Collect hearts quickly for combo multipliers.</li>
+        </ul>
+      </div>
+
+      <div id="scoreboard" class="glass panel score-panel">
+        <h2>Live Scoreboard</h2>
+        <div id="statusPill" class="status-pill">Connecting…</div>
+        <div id="scores"></div>
+      </div>
+    </section>
+
+    <main class="glass panel game-panel">
+      <div class="canvas-wrap">
+        <canvas id="gameCanvas" width="960" height="600"></canvas>
+      </div>
+
+      <div id="touchPad" class="touch-pad" aria-label="Touch controls">
+        <button data-dir="up">▲</button>
+        <div class="middle-row">
+          <button data-dir="left">◀</button>
+          <button data-dir="down">▼</button>
+          <button data-dir="right">▶</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
