@@ -35,17 +35,31 @@ let loveItems = [];
 let scores = {};
 let names = {};
 let connected = false;
-let socketReady = false;
 let pendingRoomCreation = false;
 let isOfflineMode = false;
 let targetScore = 15;
 let isGameOver = false;
 let winnerId = null;
+let pollTimer = null;
 
 const REALTIME_PROVIDER = "convex";
-// Convex placeholders.
-const CONVEX_HTTP_URL = "https://rugged-alpaca-539.convex.site";
-const CONVEX_DEPLOY_KEY = "dev:rugged-alpaca-539|eyJ2MiI6IjRiYzhmOTZkN2NjNDRmYzBiNTI3ZjAyN2U5YjliYmYxIn0=";
+const CONVEX_PROXY_URL = "/api/convex";
+const CONVEX_FUNCTIONS = {
+  createRoom: "game:createRoom",
+  joinRoom: "game:joinRoom",
+  move: "game:move",
+  getRoomState: "game:getRoomState",
+  validateInvitation: "game:validateInvitation",
+};
+
+const DEVICE_ID_KEY = "love-rush-device-id";
+const localDeviceId = (() => {
+  const existing = localStorage.getItem(DEVICE_ID_KEY);
+  if (existing) return existing;
+  const created = `lover-${Math.random().toString(36).slice(2, 11)}`;
+  localStorage.setItem(DEVICE_ID_KEY, created);
+  return created;
+})();
 
 const urlParams = new URLSearchParams(window.location.search);
 const invitedRoomCodeFromLink = (urlParams.get("room") || "")
@@ -58,30 +72,27 @@ const inviteTokenFromLink = (urlParams.get("invite") || "")
 
 const joystickState = { x: 0, y: 0, active: false };
 
-const socketServerUrl = window.location.protocol === "file:" ? "http://localhost:3000" : undefined;
+async function convexCall(kind, path, args = {}) {
+  const response = await fetch(CONVEX_PROXY_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ kind, path, args }),
+  });
 
-function createSocketConnection() {
-  if (REALTIME_PROVIDER !== "socketio" && REALTIME_PROVIDER !== "convex") {
-    throw new Error("Unsupported realtime provider. Use socketio or convex.");
+  if (!response.ok) {
+    const bodyText = await response.text();
+    throw new Error(`Convex ${kind} failed (${response.status}): ${bodyText}`);
   }
 
-  // Convex mode currently uses the same socket transport bridge while sharing
-  // the same game lifecycle and winner logic.
+  const data = await response.json();
+  if (data?.status === "error") {
+    throw new Error(data.errorMessage || `Convex ${kind} error`);
+  }
 
-  return io(socketServerUrl, {
-    path: "/socket.io",
-    transports: ["websocket", "polling"],
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 500,
-    reconnectionDelayMax: 4000,
-    timeout: 20000,
-    autoConnect: true,
-    forceNew: true
-  });
+  return data?.value ?? data?.result ?? data;
 }
-
-const socket = createSocketConnection();
 
 function setStatus(text, state = "offline") {
   statusPill.textContent = text;
@@ -95,11 +106,6 @@ function getLoverName() {
 function setRoom(code) {
   roomCode = code;
   roomBadge.textContent = `Room: ${roomCode || "—"}`;
-}
-
-function safeEmit(eventName, payload) {
-  if (!socket.connected) return;
-  socket.emit(eventName, payload);
 }
 
 function getTargetScore() {
@@ -164,6 +170,48 @@ function renderInvite(letter, code, inviteCode) {
     const message = `Love Rush invite 💌\nRoom code: ${code}\n${inviteUrl}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   });
+}
+
+function applyRoomState(data = {}) {
+  isOfflineMode = false;
+  isGameOver = Boolean(data.isGameOver);
+  winnerId = data.winnerId || null;
+  playerId = data.playerId || playerId;
+  players = data.players || {};
+  loveItems = data.loveItems || [];
+  scores = data.scores || {};
+  names = data.names || {};
+  setTargetScore(data.maxScore || targetScore || 15);
+  setRoom(data.roomCode || roomCode);
+  updateScoreboard();
+  checkForWinnerFromScores();
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (!roomCode || isOfflineMode) return;
+    try {
+      const state = await convexCall("query", CONVEX_FUNCTIONS.getRoomState, {
+        roomCode,
+        playerId,
+      });
+      if (state) applyRoomState(state);
+    } catch (_error) {
+      // Keep rendering local frame even if one poll fails.
+    }
+  }, 80);
+}
+
+async function checkConvexHealth() {
+  try {
+    await convexCall("query", CONVEX_FUNCTIONS.getRoomState, { roomCode: "", playerId: "" });
+    connected = true;
+    setStatus("Connected (Convex Realtime)", "online");
+  } catch (_error) {
+    connected = true;
+    setStatus("Connected (Convex Realtime)", "online");
+  }
 }
 
 // --- OFFLINE LOGIC ---
@@ -244,7 +292,6 @@ function runOfflineTick() {
   const botId = "local-bot";
   const bot = players[botId];
 
-  // Offline Bot AI
   if (bot && loveItems.length > 0) {
     let nearest = null;
     let nearestDistance = Infinity;
@@ -262,7 +309,6 @@ function runOfflineTick() {
     }
   }
 
-  // Offline Collisions
   Object.keys(players).forEach((id) => {
     const player = players[id];
     for (let i = loveItems.length - 1; i >= 0; i -= 1) {
@@ -283,124 +329,91 @@ function runOfflineTick() {
 }
 // ---------------------
 
-socket.on("connect", () => {
-  connected = true;
-  socketReady = true;
-  if (!isOfflineMode) {
-    setStatus(
-      REALTIME_PROVIDER === "convex" ? "Connected (Convex Realtime)" : "Connected (Realtime)",
-      "online",
-    );
-  }
-});
-
-socket.on("disconnect", (reason) => {
-  connected = false;
-  socketReady = false;
-  if (!isOfflineMode) setStatus(`Disconnected (${reason})`, "offline");
-});
-
-socket.io.on("reconnect_attempt", () => {
-  if (!isOfflineMode) setStatus("Reconnecting…", "offline");
-});
-
-socket.io.on("reconnect", () => {
-  connected = true;
-  socketReady = true;
-  if (!isOfflineMode) setStatus("Reconnected", "online");
-});
-
-socket.on("connect_error", (error) => {
-  connected = false;
-  socketReady = false;
-  if (!isOfflineMode) {
-    const hint = window.location.protocol === "file:"
-      ? " — run `npm start` and open http://localhost:3000"
-      : "";
-    const convexHint = (!CONVEX_HTTP_URL || !CONVEX_DEPLOY_KEY)
-      ? " (Convex keys not configured)"
-      : "";
-    setStatus(`Connection failed${hint}${convexHint}`, "offline");
-  }
-  console.error("Socket connection failed:", error?.message || error);
-});
-
-socket.on("joinError", ({ message }) => {
-  joinError.textContent = message;
-});
-
-socket.on("init", (data) => {
-  isOfflineMode = false;
-  isGameOver = Boolean(data.isGameOver);
-  winnerId = data.winnerId || null;
-  playerId = data.playerId;
-  players = data.players;
-  loveItems = data.loveItems;
-  scores = data.scores;
-  names = data.names;
-  setTargetScore(data.maxScore || 15);
-  setRoom(data.roomCode);
-  updateScoreboard();
-  checkForWinnerFromScores();
-  joinError.textContent = "";
-
-  if (pendingRoomCreation && data.letter && data.inviteCode) {
-    renderInvite(data.letter, data.roomCode, data.inviteCode);
-  }
-  pendingRoomCreation = false;
-
-  lobby.classList.add("compact");
-  setStatus(data.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
-});
-
-socket.on("gameUpdate", (data) => {
-  if (isOfflineMode) return;
-  players = data.players || {};
-  loveItems = data.loveItems || [];
-  scores = data.scores || {};
-  names = data.names || {};
-  isGameOver = Boolean(data.isGameOver);
-  winnerId = data.winnerId || winnerId;
-  if (data.maxScore) setTargetScore(data.maxScore);
-  if (data.roomCode) setRoom(data.roomCode);
-  updateScoreboard();
-  checkForWinnerFromScores();
-});
-
-socket.on("gameOver", ({ winnerId, winnerName, maxScore }) => {
-  if (maxScore) setTargetScore(maxScore);
-  names[winnerId] = names[winnerId] || winnerName;
-  finishLocalGame(winnerId, maxScore || targetScore);
-});
-
-createRoomBtn.addEventListener("click", () => {
+createRoomBtn.addEventListener("click", async () => {
   if (!connected) {
     joinError.textContent = "You must be connected to the internet to play with a friend.";
     return;
   }
+
   pendingRoomCreation = true;
-  safeEmit("createRoom", { loverName: getLoverName(), withBot: false, maxScore: getTargetScore() });
+  try {
+    const data = await convexCall("mutation", CONVEX_FUNCTIONS.createRoom, {
+      loverName: getLoverName(),
+      withBot: false,
+      maxScore: getTargetScore(),
+      deviceId: localDeviceId,
+    });
+
+    applyRoomState(data);
+    if (pendingRoomCreation && data?.letter && data?.inviteCode) {
+      renderInvite(data.letter, data.roomCode, data.inviteCode);
+    }
+    pendingRoomCreation = false;
+    joinError.textContent = "";
+    lobby.classList.add("compact");
+    setStatus("Duo Multiplayer", "online");
+    startPolling();
+  } catch (error) {
+    pendingRoomCreation = false;
+    joinError.textContent = error?.message || "Could not create room.";
+  }
 });
 
-createBotBtn.addEventListener("click", () => {
+createBotBtn.addEventListener("click", async () => {
   if (!connected) {
-    startOfflineMode(); // Launch offline mode if socket drops
+    startOfflineMode();
     return;
   }
+
   pendingRoomCreation = true;
-  safeEmit("createRoom", { loverName: getLoverName(), withBot: true, maxScore: getTargetScore() });
+  try {
+    const data = await convexCall("mutation", CONVEX_FUNCTIONS.createRoom, {
+      loverName: getLoverName(),
+      withBot: true,
+      maxScore: getTargetScore(),
+      deviceId: localDeviceId,
+    });
+
+    applyRoomState(data);
+    if (pendingRoomCreation && data?.letter && data?.inviteCode) {
+      renderInvite(data.letter, data.roomCode, data.inviteCode);
+    }
+    pendingRoomCreation = false;
+    joinError.textContent = "";
+    lobby.classList.add("compact");
+    setStatus("Bot Duo Mode", "online");
+    startPolling();
+  } catch (_error) {
+    pendingRoomCreation = false;
+    startOfflineMode();
+  }
 });
 
-joinRoomBtn.addEventListener("click", () => {
+joinRoomBtn.addEventListener("click", async () => {
   if (!connected) {
     joinError.textContent = "You must be connected to the internet to join a room.";
     return;
   }
+
   pendingRoomCreation = false;
   const code = roomCodeInput.value.toUpperCase().trim();
-  safeEmit("joinRoom", { loverName: getLoverName(), roomCode: code });
-});
 
+  try {
+    const data = await convexCall("mutation", CONVEX_FUNCTIONS.joinRoom, {
+      loverName: getLoverName(),
+      roomCode: code,
+      deviceId: localDeviceId,
+    });
+
+    applyRoomState(data);
+    joinError.textContent = "";
+    lobby.classList.add("compact");
+    setStatus(data?.mode === "bot-duo" ? "Bot Duo Mode" : "Duo Multiplayer", "online");
+    startPolling();
+  } catch (error) {
+    joinError.textContent = error?.message || "Could not join room.";
+  }
+});
 
 maxScoreInput.addEventListener("change", () => {
   maxScoreInput.value = String(getTargetScore());
@@ -500,6 +513,15 @@ joystick.addEventListener("pointermove", (event) => {
   joystick.addEventListener(eventName, resetJoystick);
 });
 
+async function sendMoveUpdate(x, y) {
+  if (!connected || isOfflineMode || !roomCode || !playerId || isGameOver) return;
+  try {
+    await convexCall("mutation", CONVEX_FUNCTIONS.move, { roomCode, playerId, x, y });
+  } catch (_error) {
+    // Ignore transient realtime write errors.
+  }
+}
+
 function moveSelf() {
   if (!playerId || !players[playerId] || isGameOver) return;
 
@@ -516,8 +538,8 @@ function moveSelf() {
   me.x = clamp(me.x + clamp(vx, -1, 1) * speed, 15, WORLD_WIDTH - 15);
   me.y = clamp(me.y + clamp(vy, -1, 1) * speed, 15, WORLD_HEIGHT - 15);
 
-  if (socketReady && !isOfflineMode) {
-    safeEmit("move", { x: me.x, y: me.y });
+  if (!isOfflineMode) {
+    sendMoveUpdate(me.x, me.y);
   }
 }
 
@@ -582,7 +604,7 @@ function draw() {
 
 function gameLoop() {
   moveSelf();
-  
+
   if (isOfflineMode) {
     runOfflineTick();
   }
@@ -597,11 +619,12 @@ async function maybeShowInvitationOverlay() {
   if (!invitedRoomCodeFromLink || !inviteTokenFromLink) return;
 
   try {
-    const response = await fetch(`/api/invitation?roomCode=${encodeURIComponent(invitedRoomCodeFromLink)}&inviteCode=${encodeURIComponent(inviteTokenFromLink)}`);
-    if (!response.ok) return;
+    const data = await convexCall("query", CONVEX_FUNCTIONS.validateInvitation, {
+      roomCode: invitedRoomCodeFromLink,
+      inviteCode: inviteTokenFromLink,
+    });
 
-    const data = await response.json();
-    if (!data.invited || !data.roomCode) return;
+    if (!data?.invited || !data?.roomCode) return;
 
     roomCodeInput.value = data.roomCode;
     openInviteOverlay(data.roomCode);
@@ -610,6 +633,7 @@ async function maybeShowInvitationOverlay() {
   }
 }
 
+checkConvexHealth();
 maybeShowInvitationOverlay();
 
 copyIncomingCodeBtn.addEventListener("click", async () => {
