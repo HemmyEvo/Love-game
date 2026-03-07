@@ -86,7 +86,13 @@ function processGameState(room) {
 }
 
 export const createRoom = mutation({
-  args: { loverName: v.optional(v.string()), deviceId: v.optional(v.string()), maxScore: v.optional(v.number()), timeLimit: v.optional(v.number()) },
+  args: {
+    loverName: v.optional(v.string()),
+    deviceId: v.optional(v.string()),
+    maxScore: v.optional(v.number()),
+    timeLimit: v.optional(v.number()),
+    selectedSongId: v.optional(v.string())
+  },
   handler: async (ctx, args) => {
     const playerId = args.deviceId || `player-${Math.random().toString(36).substring(2)}`;
     
@@ -107,12 +113,13 @@ export const createRoom = mutation({
 
     await ctx.db.insert("rooms", {
       roomCode, createdAt: Date.now(), maxScore: args.maxScore || 20, timeLimit: args.timeLimit || 60,
+      selectedSongId: args.selectedSongId || "romantic-piano",
       gameStartTime: null, gameStarted: false, readyPlayers, isGameOver: false, winnerId: null,
       players, scores, names, loveItems: Array.from({ length: 20 }, createLoveItem),
       todData: null
     });
 
-    return { roomCode, playerId };
+    return { roomCode, playerId, selectedSongId: args.selectedSongId || "romantic-piano" };
   },
 });
 
