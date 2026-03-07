@@ -39,7 +39,6 @@ let audioCtx;
 const streamPlayer = new Audio();
 streamPlayer.loop = true;
 streamPlayer.preload = "auto";
-// streamPlayer.crossOrigin = "anonymous";
 streamPlayer.volume = 0.4;
 let soundEnabled = true;
 let selectedSongId = LOVE_SONGS[0].id;
@@ -112,7 +111,7 @@ const el = {
   soundToggleBtn: document.getElementById("soundToggleBtn"),
   roomCodeInput: document.getElementById("roomCodeInput"),
   createRoomBtn: document.getElementById("createRoomBtn"),
-  createBotBtn: document.getElementById("createBotBtn"), // Re-enabled Bot Button
+  createBotBtn: document.getElementById("createBotBtn"),
   joinRoomBtn: document.getElementById("joinRoomBtn"),
   readyBtn: document.getElementById("readyBtn"),
   
@@ -145,6 +144,19 @@ const el = {
   featherPen: document.getElementById("featherPen")
 };
 
+// --- SESSION STORAGE HELPERS ---
+function saveSessionState(rCode, pId, offline) {
+  localStorage.setItem("lra-room-code", rCode);
+  if (pId) localStorage.setItem("lra-player-id", pId);
+  localStorage.setItem("lra-offline", offline ? "true" : "false");
+}
+
+function clearSessionState() {
+  localStorage.removeItem("lra-room-code");
+  localStorage.removeItem("lra-player-id");
+  localStorage.removeItem("lra-offline");
+}
+
 // --- SCROLL ANIMATIONS ---
 function openScroll(scrollElement) {
   scrollElement.classList.add("open");
@@ -156,9 +168,6 @@ function closeScroll(scrollElement, overlayElement, callback) {
     if (callback) callback();
   }, 1000); 
 }
-
-// Initial Unfurl
-setTimeout(() => openScroll(el.introScroll), 100);
 
 el.enterCastleBtn.addEventListener("click", () => {
   initAudio();
@@ -237,7 +246,7 @@ let playerId = null, roomCode = null;
 let players = {}, renderPlayers = {}, loveItems = [], scores = {}, names = {};
 let isGameOver = false, winnerId = null;
 let gameStartTime = null, pollTimer = null, todPhaseActive = false;
-let isOfflineMode = false; // Flag to isolate bot matches from the DB
+let isOfflineMode = false;
 
 const CONVEX_PROXY_URL = "/api/convex";
 const CONVEX_FUNCTIONS = {
@@ -314,6 +323,7 @@ function handleRoomDestroyed() {
   pollTimer = null;
   isGameOver = true;
   roomCode = null;
+  clearSessionState(); // Clear session if room destroyed
   el.hud.classList.add("hidden");
   el.resultModal.classList.add("hidden");
   el.todModal.classList.add("hidden");
@@ -337,10 +347,15 @@ function applyRoomState(data = {}) {
   isGameOver = Boolean(data.isGameOver);
   winnerId = data.winnerId || null; 
   playerId = data.playerId || playerId;
+  
+  if (playerId) localStorage.setItem("lra-player-id", playerId); // Ensure playerId saves
+
   gameStartTime = data.gameStartTime || null;
   activeMaxScore = data.maxScore || 20; 
   activeTimeLimit = data.timeLimit || 60;
-  if (data.selectedSongId) setSelectedSong(data.selectedSongId, true);
+
+  // REMOVED: Sound selection state application entirely
+  // Local song settings will no longer be overwritten by the database
   
   if (scores[playerId] !== undefined && data.scores && data.scores[playerId] > scores[playerId]) {
     playCollectSound();
@@ -405,13 +420,11 @@ el.submitTodBtn.addEventListener("click", async () => {
   el.submitTodBtn.disabled = true;
 
   if (isOfflineMode) {
-    // Local processing for offline mode
     setTimeout(() => {
       el.todModal.classList.add("hidden");
       showFinalResultModal({ prompt: el.todPromptText.textContent, answer: ans });
     }, 500);
   } else {
-    // Database sync for multiplayer
     try {
       await convexCall("mutation", CONVEX_FUNCTIONS.submitTod, { roomCode, answer: ans });
       el.todModal.classList.add("hidden");
@@ -445,7 +458,6 @@ function showFinalResultModal(todData) {
 
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  // Heavy polling to emulate Socket real-time performance (20ms interval)
   pollTimer = setInterval(async () => {
     if (!roomCode || isOfflineMode) return;
     try {
@@ -453,7 +465,7 @@ function startPolling() {
       if (state) {
         applyRoomState(state);
       } else {
-        handleRoomDestroyed(); // The room was deleted (someone left)
+        handleRoomDestroyed();
       }
     } catch (e) {}
   }, 20);
@@ -475,7 +487,7 @@ function startOfflineMode() {
   };
   renderPlayers = { ...players }; 
   names = { [playerId]: getLoverName(), [botId]: "Spirit Bot" };
-  scores = { [playerId]: 0, [botId]: 0 };
+  scores = { [playerId]: 0, [botId]: 0 }; // Scores reset naturally here
   
   loveItems = Array.from({ length: 20 }, (_, i) => ({ 
     id: i, x: Math.random() * 900 + 30, y: Math.random() * 540 + 30, type: Math.floor(Math.random() * 4) 
@@ -486,6 +498,9 @@ function startOfflineMode() {
   winnerId = null; 
   todPhaseActive = false;
   roomCode = "LOCAL";
+
+  saveSessionState(roomCode, playerId, true); // Persist offline session
+
   setSelectedSong(el.songSelect.value || selectedSongId, true);
   el.roomBadge.textContent = "Chamber: Spirit Realm";
   
@@ -507,10 +522,8 @@ function finishLocalGame() {
   if (winnerId !== "draw") {
     const promptObj = naughtyPrompts[Math.floor(Math.random() * naughtyPrompts.length)];
     if (winnerId === "bot-player") {
-      // You lost to the bot, you must do a local ToD
       handleTodPhase({ loserId: playerId, prompt: promptObj.text, isDare: promptObj.type === "Dare", completed: false });
     } else {
-      // You won, bot auto-responds
       showFinalResultModal({ prompt: promptObj.text, answer: "*Ancient Spirit Noises* I submit to your power, mortal." });
     }
   } else {
@@ -529,7 +542,6 @@ function runOfflineTick() {
       const d = (item.x - bot.x)**2 + (item.y - bot.y)**2;
       if (d < minDist) { minDist = d; nearest = item; }
     });
-    // Move bot towards nearest heart
     bot.x += Math.sign(nearest.x - bot.x) * 1.5;
     bot.y += Math.sign(nearest.y - bot.y) * 1.5;
   }
@@ -581,10 +593,14 @@ el.createRoomBtn.addEventListener("click", async () => {
       deviceId: localDeviceId,
       maxScore: getCustomScore(),
       timeLimit: getCustomTime(),
-      selectedSongId: el.songSelect.value
+      // REMOVED selectedSongId injection into DB.
     });
-    roomCode = data.roomCode; applyRoomState(data); setStatus("Awake", "online");
-    el.hostCodeDisplay.textContent = roomCode; el.hostShareModal.classList.remove("hidden");
+    roomCode = data.roomCode; 
+    applyRoomState(data); 
+    saveSessionState(roomCode, playerId, false); // Persist session
+    setStatus("Awake", "online");
+    el.hostCodeDisplay.textContent = roomCode; 
+    el.hostShareModal.classList.remove("hidden");
     startPolling();
   } catch (e) { el.joinError.textContent = e.message || "Failed to open chamber."; }
 });
@@ -607,7 +623,11 @@ el.joinRoomBtn.addEventListener("click", async () => {
   isOfflineMode = false;
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.joinRoom, { loverName: getLoverName(), roomCode: code, deviceId: localDeviceId });
-    roomCode = code; applyRoomState(data); setStatus("Awake", "online"); startPolling();
+    roomCode = code; 
+    applyRoomState(data); 
+    saveSessionState(roomCode, playerId, false); // Persist session
+    setStatus("Awake", "online"); 
+    startPolling();
   } catch (e) { el.joinError.textContent = e.message || "Failed to enter chamber."; }
 });
 
@@ -626,22 +646,31 @@ el.playAgainBtn.addEventListener("click", async () => {
     return;
   }
   
+  // RESET SCORE: Force visual UI reset immediately for the rematch
+  scores = {};
+  if (playerId) scores[playerId] = 0;
+  updateScoreboard();
+
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.playAgain, { roomCode, playerId });
     el.readyBtn.disabled = false; el.readyBtn.textContent = "I am Ready"; todPhaseActive = false; applyRoomState(data);
   } catch(e) {}
 });
 
-// Explicit Leave Room functionality
 el.leaveRoomBtn.addEventListener("click", async () => {
   if(roomCode && playerId && !isOfflineMode) {
     try { await convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }); } catch(e) {}
   }
+  clearSessionState(); // Clear session state when leaving manually
   window.location.reload();
 });
 
 // --- MOVEMENT & RENDER LOOP ---
-document.addEventListener("keydown", e => { const m = { ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right", ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down" }; if (m[e.code]) keys.add(m[e.code]); });
+document.addEventListener("keydown", e => { 
+  // Safety resume for audio on first key press
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  const m = { ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right", ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down" }; if (m[e.code]) keys.add(m[e.code]); 
+});
 document.addEventListener("keyup", e => { const m = { ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right", ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down" }; if (m[e.code]) keys.delete(m[e.code]); });
 
 const moveJoystick = (clientX, clientY) => {
@@ -652,14 +681,17 @@ const moveJoystick = (clientX, clientY) => {
   el.joystickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
 };
 
-el.joystick.addEventListener("pointerdown", e => { el.joystick.setPointerCapture(e.pointerId); moveJoystick(e.clientX, e.clientY); });
+el.joystick.addEventListener("pointerdown", e => { 
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  el.joystick.setPointerCapture(e.pointerId); moveJoystick(e.clientX, e.clientY); 
+});
 el.joystick.addEventListener("pointermove", e => { if (joystickState.active) moveJoystick(e.clientX, e.clientY); });
 ["pointerup", "pointercancel"].forEach(ev => el.joystick.addEventListener(ev, () => { joystickState.active = false; joystickState.x = 0; joystickState.y = 0; el.joystickKnob.style.transform = `translate(-50%, -50%)`; }));
 
 async function sendMove(x, y) {
   if (isOfflineMode || !roomCode || !playerId || isGameOver) return;
   const now = Date.now(); 
-  if (now - lastSentMove.at < 20) return; // Ultra-fast 20ms send throttle to simulate true socket stream
+  if (now - lastSentMove.at < 20) return; 
   lastSentMove.x = x; lastSentMove.y = y; lastSentMove.at = now;
   try { await convexCall("mutation", CONVEX_FUNCTIONS.move, { roomCode, playerId, x, y }); } catch (e) {}
 }
@@ -692,13 +724,10 @@ function draw() {
   });
 }
 
-// --- AUTO PAUSE/RESUME ON TAB CHANGE ---
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    // Pause the music when the tab is inactive
     streamPlayer.pause();
   } else {
-    // Resume the music when they come back, ONLY if sound is actually enabled
     if (soundEnabled) {
       streamPlayer.play().catch(() => {});
     }
@@ -717,7 +746,6 @@ function gameLoop() {
     if (!renderPlayers[id]) {
       renderPlayers[id] = { ...target };
     } else { 
-      // INSTANT SNAP: no more lag/lerping for true real-time multiplayer feel
       renderPlayers[id].x = target.x; 
       renderPlayers[id].y = target.y; 
       renderPlayers[id].color = target.color; 
@@ -730,3 +758,26 @@ function gameLoop() {
 
 setInterval(updateLocalTimer, 1000);
 gameLoop();
+
+// --- INITIALIZATION BOOTSTRAPPER ---
+const savedRoom = localStorage.getItem("lra-room-code");
+const savedOffline = localStorage.getItem("lra-offline") === "true";
+playerId = localStorage.getItem("lra-player-id") || null;
+
+if (savedRoom) {
+  // Bypass intro logic
+  el.loreIntro.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  
+  if (savedOffline) {
+    startOfflineMode();
+  } else {
+    roomCode = savedRoom;
+    isOfflineMode = false;
+    el.hud.classList.remove("hidden");
+    startPolling();
+  }
+} else {
+  // First time unfurl
+  setTimeout(() => openScroll(el.introScroll), 100);
+}
