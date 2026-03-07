@@ -3,9 +3,78 @@ const ctx = canvas.getContext("2d");
 
 // --- WEB AUDIO API ---
 let audioCtx;
+let romanceMusic = { started: false, nodes: [], interval: null };
+
 function initAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume();
+  startRomanticInstrumental();
+}
+
+function clearRomanceMusicNodes() {
+  romanceMusic.nodes.forEach(node => {
+    try { node.stop(); } catch (e) {}
+    try { node.disconnect(); } catch (e) {}
+  });
+  romanceMusic.nodes = [];
+}
+
+function playRomanceChord(freqs = []) {
+  if (!audioCtx) return;
+  clearRomanceMusicNodes();
+
+  const now = audioCtx.currentTime;
+  const chordGain = audioCtx.createGain();
+  chordGain.gain.setValueAtTime(0.0001, now);
+  chordGain.gain.exponentialRampToValueAtTime(0.02, now + 0.7);
+  chordGain.gain.exponentialRampToValueAtTime(0.014, now + 2.8);
+  chordGain.connect(audioCtx.destination);
+
+  freqs.forEach((freq, index) => {
+    const osc = audioCtx.createOscillator();
+    const tremolo = audioCtx.createOscillator();
+    const tremoloGain = audioCtx.createGain();
+
+    osc.type = index === 0 ? "triangle" : "sine";
+    osc.frequency.setValueAtTime(freq, now);
+
+    tremolo.type = "sine";
+    tremolo.frequency.setValueAtTime(4 + index, now);
+    tremoloGain.gain.setValueAtTime(1.5 + index * 0.8, now);
+
+    tremolo.connect(tremoloGain);
+    tremoloGain.connect(osc.frequency);
+    osc.connect(chordGain);
+
+    osc.start(now);
+    tremolo.start(now);
+    osc.stop(now + 3.2);
+    tremolo.stop(now + 3.2);
+
+    romanceMusic.nodes.push(osc, tremolo, tremoloGain);
+  });
+
+  romanceMusic.nodes.push(chordGain);
+}
+
+function startRomanticInstrumental() {
+  if (!audioCtx || romanceMusic.started) return;
+  romanceMusic.started = true;
+
+  const chordProgression = [
+    [220.0, 261.63, 329.63], // A minor
+    [196.0, 246.94, 293.66], // G major
+    [174.61, 220.0, 261.63], // F major
+    [196.0, 233.08, 293.66], // Gsus2
+  ];
+  let chordIndex = 0;
+
+  playRomanceChord(chordProgression[chordIndex]);
+  romanceMusic.interval = setInterval(() => {
+    if (!audioCtx || audioCtx.state !== "running") return;
+    chordIndex = (chordIndex + 1) % chordProgression.length;
+    playRomanceChord(chordProgression[chordIndex]);
+  }, 3000);
 }
 
 function playCollectSound() {
@@ -231,7 +300,15 @@ function handleRoomDestroyed() {
   el.lobby.classList.remove("hidden");
   setTimeout(() => openScroll(el.lobbyScroll), 50);
   el.joinError.textContent = "The chamber collapsed! Your partner fled.";
+  window.alert("Your partner has left the room.");
   setStatus("Asleep", "offline");
+}
+
+function resumeCurrentRoom() {
+  setStatus("Awake", "online");
+  if (el.hud.classList.contains("hidden") && !isGameOver) {
+    closeScroll(el.lobbyScroll, el.lobby, () => el.hud.classList.remove("hidden"));
+  }
 }
 
 function applyRoomState(data = {}) {
@@ -458,6 +535,22 @@ el.createBotBtn.addEventListener("click", startOfflineMode);
 
 el.createRoomBtn.addEventListener("click", async () => {
   initAudio();
+
+  if (roomCode && playerId && !isOfflineMode && !isGameOver) {
+    const shouldLeave = window.confirm(
+      `You are already in room ${roomCode}.\n\nPress OK to leave it and create a new room, or Cancel to resume your current room.`
+    );
+
+    if (!shouldLeave) {
+      resumeCurrentRoom();
+      return;
+    }
+
+    try {
+      await convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId });
+    } catch (e) {}
+  }
+
   isOfflineMode = false;
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.createRoom, { 
