@@ -1,89 +1,78 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// --- WEB AUDIO API ---
+const LOVE_SONGS = [
+  {
+    id: "romantic-piano",
+    title: "Romantic Piano",
+    artist: "Ashot-Danielyan-Composer",
+    streamUrl: "https://cdn.pixabay.com/download/audio/2022/05/16/audio_8f27f30f89.mp3?filename=romantic-11157.mp3",
+  },
+  {
+    id: "tenderness",
+    title: "Tenderness",
+    artist: "Lesfm",
+    streamUrl: "https://cdn.pixabay.com/download/audio/2022/02/10/audio_d9d83ff4f1.mp3?filename=tenderness-2456.mp3",
+  },
+  {
+    id: "love-ballad",
+    title: "Love Ballad",
+    artist: "AleksandrKarabanov",
+    streamUrl: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_5ef43abf49.mp3?filename=love-ballad-16017.mp3",
+  },
+  {
+    id: "romantic-day",
+    title: "Romantic Day",
+    artist: "Ashot-Danielyan-Composer",
+    streamUrl: "https://cdn.pixabay.com/download/audio/2022/10/25/audio_7783f34577.mp3?filename=romantic-day-124856.mp3",
+  },
+];
+
+// --- AUDIO ---
 let audioCtx;
-let romanceMusic = { started: false, nodes: [], interval: null };
+const streamPlayer = new Audio();
+streamPlayer.loop = true;
+streamPlayer.preload = "auto";
+streamPlayer.crossOrigin = "anonymous";
+streamPlayer.volume = 0.5;
+let soundEnabled = true;
+let selectedSongId = LOVE_SONGS[0].id;
+
+function getSongById(songId) {
+  return LOVE_SONGS.find(song => song.id === songId) || LOVE_SONGS[0];
+}
+
+function updateSoundToggleText() {
+  el.soundToggleBtn.textContent = soundEnabled ? "🔊 Sound On" : "🔇 Sound Off";
+}
+
+function setSelectedSong(songId, shouldPlay = true) {
+  const song = getSongById(songId);
+  selectedSongId = song.id;
+  if (el.songSelect.value !== song.id) el.songSelect.value = song.id;
+
+  if (streamPlayer.src !== song.streamUrl) {
+    streamPlayer.src = song.streamUrl;
+  }
+
+  if (soundEnabled && shouldPlay) {
+    streamPlayer.play().catch(() => {});
+  }
+}
 
 function initAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  startRomanticInstrumental();
-}
-
-function clearRomanceMusicNodes() {
-  romanceMusic.nodes.forEach(node => {
-    try { node.stop(); } catch (e) {}
-    try { node.disconnect(); } catch (e) {}
-  });
-  romanceMusic.nodes = [];
-}
-
-function playRomanceChord(freqs = []) {
-  if (!audioCtx) return;
-  clearRomanceMusicNodes();
-
-  const now = audioCtx.currentTime;
-  const chordGain = audioCtx.createGain();
-  chordGain.gain.setValueAtTime(0.0001, now);
-  chordGain.gain.exponentialRampToValueAtTime(0.02, now + 0.7);
-  chordGain.gain.exponentialRampToValueAtTime(0.014, now + 2.8);
-  chordGain.connect(audioCtx.destination);
-
-  freqs.forEach((freq, index) => {
-    const osc = audioCtx.createOscillator();
-    const tremolo = audioCtx.createOscillator();
-    const tremoloGain = audioCtx.createGain();
-
-    osc.type = index === 0 ? "triangle" : "sine";
-    osc.frequency.setValueAtTime(freq, now);
-
-    tremolo.type = "sine";
-    tremolo.frequency.setValueAtTime(4 + index, now);
-    tremoloGain.gain.setValueAtTime(1.5 + index * 0.8, now);
-
-    tremolo.connect(tremoloGain);
-    tremoloGain.connect(osc.frequency);
-    osc.connect(chordGain);
-
-    osc.start(now);
-    tremolo.start(now);
-    osc.stop(now + 3.2);
-    tremolo.stop(now + 3.2);
-
-    romanceMusic.nodes.push(osc, tremolo, tremoloGain);
-  });
-
-  romanceMusic.nodes.push(chordGain);
-}
-
-function startRomanticInstrumental() {
-  if (!audioCtx || romanceMusic.started) return;
-  romanceMusic.started = true;
-
-  const chordProgression = [
-    [220.0, 261.63, 329.63], // A minor
-    [196.0, 246.94, 293.66], // G major
-    [174.61, 220.0, 261.63], // F major
-    [196.0, 233.08, 293.66], // Gsus2
-  ];
-  let chordIndex = 0;
-
-  playRomanceChord(chordProgression[chordIndex]);
-  romanceMusic.interval = setInterval(() => {
-    if (!audioCtx || audioCtx.state !== "running") return;
-    chordIndex = (chordIndex + 1) % chordProgression.length;
-    playRomanceChord(chordProgression[chordIndex]);
-  }, 3000);
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  if (soundEnabled) setSelectedSong(selectedSongId, true);
 }
 
 function playCollectSound() {
-  if (!audioCtx) return;
+  if (!audioCtx || !soundEnabled) return;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.connect(gain); gain.connect(audioCtx.destination);
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(600, audioCtx.currentTime); 
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(600, audioCtx.currentTime);
   osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
   gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
@@ -113,6 +102,8 @@ const el = {
   loverName: document.getElementById("loverName"),
   targetScoreInput: document.getElementById("targetScoreInput"),
   timeLimitInput: document.getElementById("timeLimitInput"),
+  songSelect: document.getElementById("songSelect"),
+  soundToggleBtn: document.getElementById("soundToggleBtn"),
   roomCodeInput: document.getElementById("roomCodeInput"),
   createRoomBtn: document.getElementById("createRoomBtn"),
   createBotBtn: document.getElementById("createBotBtn"), // Re-enabled Bot Button
@@ -169,6 +160,30 @@ el.enterCastleBtn.addEventListener("click", () => {
     el.lobby.classList.remove("hidden");
     setTimeout(() => openScroll(el.lobbyScroll), 50);
   });
+});
+
+LOVE_SONGS.forEach(song => {
+  const option = document.createElement("option");
+  option.value = song.id;
+  option.textContent = `${song.title} — ${song.artist}`;
+  el.songSelect.appendChild(option);
+});
+setSelectedSong(selectedSongId, false);
+updateSoundToggleText();
+
+el.songSelect.addEventListener("change", () => {
+  setSelectedSong(el.songSelect.value, true);
+});
+
+el.soundToggleBtn.addEventListener("click", () => {
+  soundEnabled = !soundEnabled;
+  if (soundEnabled) {
+    initAudio();
+    setSelectedSong(selectedSongId, true);
+  } else {
+    streamPlayer.pause();
+  }
+  updateSoundToggleText();
 });
 
 // --- FEATHER PEN ANIMATION ---
@@ -319,6 +334,7 @@ function applyRoomState(data = {}) {
   gameStartTime = data.gameStartTime || null;
   activeMaxScore = data.maxScore || 20; 
   activeTimeLimit = data.timeLimit || 60;
+  if (data.selectedSongId) setSelectedSong(data.selectedSongId, true);
   
   if (scores[playerId] !== undefined && data.scores && data.scores[playerId] > scores[playerId]) {
     playCollectSound();
@@ -464,6 +480,7 @@ function startOfflineMode() {
   winnerId = null; 
   todPhaseActive = false;
   roomCode = "LOCAL";
+  setSelectedSong(el.songSelect.value || selectedSongId, true);
   el.roomBadge.textContent = "Chamber: Spirit Realm";
   
   closeScroll(el.lobbyScroll, el.lobby, () => {
@@ -554,7 +571,11 @@ el.createRoomBtn.addEventListener("click", async () => {
   isOfflineMode = false;
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.createRoom, { 
-      loverName: getLoverName(), deviceId: localDeviceId, maxScore: getCustomScore(), timeLimit: getCustomTime() 
+      loverName: getLoverName(),
+      deviceId: localDeviceId,
+      maxScore: getCustomScore(),
+      timeLimit: getCustomTime(),
+      selectedSongId: el.songSelect.value
     });
     roomCode = data.roomCode; applyRoomState(data); setStatus("Awake", "online");
     el.hostCodeDisplay.textContent = roomCode; el.hostShareModal.classList.remove("hidden");
