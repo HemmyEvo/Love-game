@@ -356,45 +356,49 @@ el.roomBadge.addEventListener("click", () => {
   setTimeout(() => el.roomBadge.textContent = originalText, 2000);
 });
 
-// 1. The "Exit Room" Button in the Top HUD
+// --- HUD Exit Button ---
 el.exitGameBtn.addEventListener("click", () => {
   el.exitGameBtn.textContent = "Exiting...";
   el.exitGameBtn.disabled = true;
 
-  // 1. Wipe the bot/multiplayer session from local storage immediately
-  clearSessionState();
+  // 1. Explicitly clear the local storage keys to forget the session
+  localStorage.removeItem("lra-room-code");
+  localStorage.removeItem("lra-player-id");
+  localStorage.removeItem("lra-offline");
   
-  // 2. Instantly kill the offline game loop so it stops updating
+  // 2. Stop the game loop instantly
   isGameOver = true;
   if (pollTimer) clearInterval(pollTimer);
 
-  // 3. If it happens to be multiplayer, notify the database (fire-and-forget)
+  // 3. If it's a multiplayer match, tell the database you are leaving (fire-and-forget)
   if (!isOfflineMode && roomCode && roomCode !== "LOCAL") {
     convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }).catch(() => {});
   }
 
-  // 4. Force a hard navigation to the clean home URL
+  // 4. Force navigation to the clean base URL
   window.location.href = window.location.pathname; 
 });
 
-// 2. The "Flee the Castle" Button on the Results Modal
+// --- Modal 'Flee the Castle' Button ---
 el.leaveRoomBtn.addEventListener("click", () => {
   el.leaveRoomBtn.textContent = "Exiting...";
   el.leaveRoomBtn.disabled = true;
 
-  // 1. Wipe the bot/multiplayer session from local storage immediately
-  clearSessionState(); 
+  // 1. Explicitly clear the local storage keys to forget the session
+  localStorage.removeItem("lra-room-code");
+  localStorage.removeItem("lra-player-id");
+  localStorage.removeItem("lra-offline");
 
-  // 2. Instantly kill the offline game loop so it stops updating
+  // 2. Stop the game loop instantly
   isGameOver = true;
   if (pollTimer) clearInterval(pollTimer);
 
-  // 3. If it happens to be multiplayer, notify the database (fire-and-forget)
+  // 3. If it's a multiplayer match, tell the database you are leaving (fire-and-forget)
   if (!isOfflineMode && roomCode && roomCode !== "LOCAL") { 
     convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }).catch(() => {}); 
   }
   
-  // 4. Force a hard navigation to the clean home URL
+  // 4. Force navigation to the clean base URL
   window.location.href = window.location.pathname; 
 });
 
