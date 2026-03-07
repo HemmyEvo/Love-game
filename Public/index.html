@@ -2,108 +2,169 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Love Rush Arena</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Love Rush: The Ancient Castle</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Merienda:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header class="topbar card">
-      <div>
-        <h1>🖤 Love Rush Arena</h1>
-        <p>Fast duo hearts battle, built for phones first.</p>
+
+  <div id="featherPen" class="feather-pen hidden">🪶</div>
+
+  <div id="loreIntro" class="modal-overlay">
+    <div class="scroll-container" id="introScroll">
+      <div class="roller top-roller"></div>
+      <div class="scroll-paper lore-card scroll-content">
+        <h1 class="castle-title">The Castle of Hearts</h1>
+        <div class="lore-text">
+          <p>Centuries ago, lovers were tested within these ancient stone walls.</p>
+          <p>Gather the scattered crimson souls before the sands of time run out.</p>
+          <p>Should you fail... the spirits will demand a confession of your deepest desires.</p>
+        </div>
+        <button id="enterCastleBtn" class="btn wax-seal">Break the Seal</button>
       </div>
-      <div class="status-wrap">
-        <div id="statusPill" class="status-pill" data-state="offline">Connecting…</div>
-        <div id="roomBadge" class="room-badge">Room: —</div>
+      <div class="roller bottom-roller"></div>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <div class="canvas-container">
+      <canvas id="gameCanvas" width="960" height="600"></canvas>
+    </div>
+
+    <header class="hud hidden" id="gameHud">
+      <div class="hud-timer parchment-box">
+        <span id="timeDisplay">1:00</span>
+      </div>
+      <div class="hud-scores parchment-box" id="scores">
+        </div>
+      <div class="hud-status parchment-box">
+        <span id="roomBadge" class="badge">Chamber: —</span>
+        <span id="statusPill" class="badge offline">Asleep</span>
       </div>
     </header>
 
-    <section id="lobby" class="card lobby">
-      <h2>Start a match</h2>
-      <input id="loverName" type="text" maxlength="20" placeholder="Your name" />
-      <div class="actions">
-        <button id="createRoomBtn">Create Duo Room</button>
-        <button id="createBotBtn">Play vs Cupid Bot</button>
-      </div>
-      <div class="join-row">
-        <input id="roomCodeInput" type="text" maxlength="6" placeholder="Enter code" />
-        <button id="joinRoomBtn">Join</button>
-      </div>
-      <p id="joinError" class="error"></p>
+    <section id="lobby" class="modal-overlay hidden">
+      <div class="scroll-container" id="lobbyScroll">
+        <div class="roller top-roller"></div>
+        <div class="scroll-paper lobby-panel scroll-content">
+          <div class="brand">
+            <h1>Love Rush</h1>
+            <p>The Castle Trials 🏰</p>
+          </div>
 
-      <div id="pregamePanel" class="pregame hidden">
-        <h3>💞 Match Setup</h3>
-        <p id="pregameStatus">Waiting for both lovers to choose the same max score and tap Ready.</p>
-        <div id="partnerChoice" class="partner-choice">Partner choice: —</div>
-        <div class="pregame-actions">
-          <button id="openSetupBtn" type="button">Set Match Score</button>
-          <button id="readyBtn">Ready with this max score</button>
+          <div class="input-group">
+            <input id="loverName" type="text" maxlength="20" placeholder="Inscribe your name..." autocomplete="off" />
+          </div>
+
+          <div class="settings-group">
+            <div class="setting-item">
+              <label>Target Souls</label>
+              <input id="targetScoreInput" type="number" min="5" max="99" value="20" />
+            </div>
+            <div class="setting-item">
+              <label>Sands of Time (Sec)</label>
+              <input id="timeLimitInput" type="number" min="15" max="300" value="60" />
+            </div>
+          </div>
+          
+          <div class="action-group">
+            <button id="createRoomBtn" class="btn wax-seal">Open a Chamber</button>
+            <button id="createBotBtn" class="btn outline-gold">Summon a Spirit Bot</button>
+          </div>
+
+          <div class="divider"><span>OR</span></div>
+
+          <div class="join-group">
+            <input id="roomCodeInput" type="text" maxlength="6" placeholder="Chamber Code" autocomplete="off" />
+            <button id="joinRoomBtn" class="btn outline-gold">Enter Chamber</button>
+          </div>
+          <p id="joinError" class="error-text"></p>
+
+          <div id="pregamePanel" class="pregame-box parchment-box hidden">
+            <h3>Ritual Setup</h3>
+            <p id="pregameStatus">Awaiting your beloved...</p>
+            <div id="partnerChoice" class="partner-status">—</div>
+            <button id="readyBtn" class="btn wax-seal">I am Ready</button>
+          </div>
         </div>
+        <div class="roller bottom-roller"></div>
       </div>
-
-      <div id="loveLetter" class="invite hidden"></div>
     </section>
 
-    <main class="game card">
-      <div class="canvas-wrap">
-        <canvas id="gameCanvas" width="960" height="600"></canvas>
+    <section id="touchPad" class="touch-controls" aria-label="Joystick control">
+      <div id="joystick" class="joystick parchment-box" role="application">
+        <div id="joystickKnob" class="joystick-knob wax-seal"></div>
       </div>
-    </main>
-
-    <section class="bottom-grid">
-      <section class="card score-panel">
-        <h3>Live Scoreboard</h3>
-        <p id="targetScoreLabel" class="target-score">First to 15</p>
-        <div id="scores"></div>
-      </section>
-
-      <section id="touchPad" class="card joystick-panel" aria-label="Joystick control">
-        <h3>Move</h3>
-        <div id="joystick" class="joystick" role="application" aria-label="Touch joystick">
-          <div class="joystick-ring"></div>
-          <div id="joystickKnob" class="joystick-knob"></div>
-        </div>
-      </section>
     </section>
-  </div>
 
-  <div id="inviteOverlay" class="invite-overlay" aria-hidden="true">
-    <div class="invite-letter" id="inviteLetter">
-      <div class="letter-flap"></div>
-      <div class="letter-paper">
-        <h3>💌 Invitation Received</h3>
-        <p>Your partner invited you to Love Rush Arena.</p>
-        <p>Room Code: <strong id="incomingCode">------</strong></p>
-        <div class="letter-actions">
-          <button id="copyIncomingCodeBtn">Copy Code</button>
-          <button id="useIncomingCodeBtn">Use Code</button>
+    <div id="hostShareModal" class="modal-overlay hidden" aria-hidden="true">
+      <div class="scroll-container open">
+        <div class="roller top-roller"></div>
+        <div class="scroll-paper modal-card scroll-content">
+          <h3>🎉 Chamber Opened</h3>
+          <p>Send a raven to your partner.</p>
+          <div class="code-display" id="hostCodeDisplay">------</div>
+          <div class="modal-actions column">
+            <button id="waShareBtn" class="btn wax-seal">Share via WhatsApp</button>
+            <button id="copyHostCodeBtn" class="btn outline-gold">Copy Code</button>
+            <button id="closeHostShareBtn" class="btn text-only">Await in Chamber</button>
+          </div>
         </div>
+        <div class="roller bottom-roller"></div>
       </div>
     </div>
-  </div>
 
-
-  <div id="resultModal" class="result-modal hidden" aria-hidden="true">
-    <div class="result-card">
-      <h3 id="resultTitle">💘 Match Complete</h3>
-      <p id="resultBody"></p>
-      <div class="result-actions">
-        <button id="playAgainBtn">Play Again</button>
-        <button id="leaveRoomBtn" class="ghost">Leave Room</button>
-        <button id="closeResultBtn">Close</button>
+    <div id="todModal" class="modal-overlay hidden" aria-hidden="true">
+      <div class="scroll-container open" id="todScroll">
+        <div class="roller top-roller"></div>
+        <div class="scroll-paper modal-card tod-card scroll-content">
+          <h3 id="todTypeTitle">🔥 The Spirits Demand 🔥</h3>
+          <p class="tod-subtitle">You have fallen. Confess to proceed:</p>
+          <div class="tod-prompt-box parchment-box">
+            <p id="todPromptText">Reading the ancient scrolls...</p>
+          </div>
+          <input id="todAnswerInput" type="text" placeholder="Inscribe your answer..." autocomplete="off" />
+          <p id="todError" class="error-text"></p>
+          <div class="modal-actions">
+            <button id="submitTodBtn" class="btn wax-seal">Submit Confession</button>
+          </div>
+        </div>
+        <div class="roller bottom-roller"></div>
       </div>
     </div>
-  </div>
 
-  <div id="matchSetupModal" class="result-modal hidden" aria-hidden="true">
-    <div class="result-card setup-card">
-      <h3>🎯 Set Match Score</h3>
-      <p id="setupModalText">Pick the max score for this match before both players tap Ready.</p>
-      <input id="setupMaxScoreInput" type="number" min="3" max="99" value="15" />
-      <div class="setup-actions">
-        <button id="saveSetupBtn" type="button">Save Score</button>
-        <button id="readyFromSetupBtn" type="button">Save + Ready</button>
+    <div id="todWaitModal" class="modal-overlay hidden" aria-hidden="true">
+      <div class="scroll-container open">
+        <div class="roller top-roller"></div>
+        <div class="scroll-paper modal-card scroll-content">
+          <h3>👑 Victorious!</h3>
+          <p>The spirits are extracting a naughty confession from your partner. Wait here...</p>
+          <div class="spinner"></div>
+        </div>
+        <div class="roller bottom-roller"></div>
+      </div>
+    </div>
+
+    <div id="resultModal" class="modal-overlay hidden" aria-hidden="true">
+      <div class="scroll-container open">
+        <div class="roller top-roller"></div>
+        <div class="scroll-paper modal-card scroll-content">
+          <h2 id="resultTitle">The Trial Concludes</h2>
+          <p id="resultBody"></p>
+          
+          <div id="todResultBox" class="tod-result-box parchment-box hidden">
+            <h4>The Confession:</h4>
+            <p id="todFinalPrompt" class="muted-text"></p>
+            <p id="todFinalAnswer" class="highlight-text"></p>
+          </div>
+
+          <div class="modal-actions column">
+            <button id="playAgainBtn" class="btn wax-seal">Request Rematch</button>
+            <button id="leaveRoomBtn" class="btn outline-gold">Flee the Castle</button>
+          </div>
+        </div>
+        <div class="roller bottom-roller"></div>
       </div>
     </div>
   </div>
