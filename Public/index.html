@@ -36,10 +36,10 @@
       <div class="hud-timer parchment-box">
         <span id="timeDisplay">1:00</span>
       </div>
-      <div class="hud-status parchment-box" style="display: flex; gap: 10px; align-items: center;">
+     <div class="hud-status parchment-box" style="display: flex; gap: 10px; align-items: center; pointer-events: auto; z-index: 9999; position: relative;">
         <span id="roomBadge" class="badge" style="cursor: pointer; transition: 0.2s;" title="Click to copy code">Chamber: —</span>
         <span id="statusPill" class="badge offline">Asleep</span>
-        <button id="exitGameBtn" class="btn outline-gold" style="padding: 4px 10px; font-size: 11px;">Exit Room</button>
+        <button id="exitGameBtn" class="btn outline-gold" style="padding: 4px 10px; font-size: 11px; cursor: pointer; pointer-events: auto;">Exit Room</button>
       </div>
     </header>
 
