@@ -28,7 +28,7 @@
   </div>
 
   <div class="app-container">
-    <div class="canvas-container">
+    <div class="canvas-container" style="position: relative;">
       <canvas id="gameCanvas" width="960" height="600"></canvas>
     </div>
 
@@ -36,11 +36,10 @@
       <div class="hud-timer parchment-box">
         <span id="timeDisplay">1:00</span>
       </div>
-      <div class="hud-scores parchment-box" id="scores">
-        </div>
-      <div class="hud-status parchment-box">
-        <span id="roomBadge" class="badge">Chamber: —</span>
+      <div class="hud-status parchment-box" style="display: flex; gap: 10px; align-items: center;">
+        <span id="roomBadge" class="badge" style="cursor: pointer; transition: 0.2s;" title="Click to copy code">Chamber: —</span>
         <span id="statusPill" class="badge offline">Asleep</span>
+        <button id="exitGameBtn" class="btn outline-gold" style="padding: 4px 10px; font-size: 11px;">Exit Room</button>
       </div>
     </header>
 
@@ -175,7 +174,8 @@
       </div>
     </div>
   </div>
-<script src="/socket.io/socket.io.js"></script>
+
+  <script src="/socket.io/socket.io.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
