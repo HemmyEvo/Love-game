@@ -124,6 +124,7 @@ let isGameOver = false, winnerId = null;
 let gameStartTime = null, pollTimer = null, todPhaseActive = false;
 let isOfflineMode = false;
 let lastPartnerReadyState = false; 
+let everHadPartner = false; // Tracks if a partner ever joined for auto-flee logic
 
 const CONVEX_PROXY_URL = "/api/convex";
 const CONVEX_FUNCTIONS = { createRoom: "game:createRoom", joinRoom: "game:joinRoom", move: "game:move", getRoomState: "game:getRoomState", setMatchReady: "game:setMatchReady", playAgain: "game:playAgain", submitTod: "game:submitTod", leaveRoom: "game:leaveRoom" };
@@ -178,14 +179,12 @@ function checkAndNotifyPartnerReady(data) {
   }
 }
 
-// --- MULTIPLAYER STATE SYNC ---
+// --- MULTIPLAYER STATE SYNC & AUTO-FLEE ---
 function handleRoomDestroyed() {
   clearInterval(pollTimer); pollTimer = null; isGameOver = true; roomCode = null;
   clearSessionState();
-  el.hud.classList.add("hidden"); el.resultModal.classList.add("hidden"); el.todModal.classList.add("hidden"); el.todWaitModal.classList.add("hidden");
-  el.lobby.classList.remove("hidden"); setTimeout(() => openScroll(el.lobbyScroll), 50);
-  el.joinError.textContent = "The chamber collapsed! Your partner fled."; window.alert("Your partner has left the room.");
-  setStatus("Asleep", "offline");
+  window.alert("The chamber collapsed! Your partner fled.");
+  window.location.href = window.location.pathname; // Auto-flee and refresh
 }
 
 function resumeCurrentRoom() {
@@ -198,6 +197,7 @@ function resumeCurrentRoom() {
 }
 
 function applyRoomState(data = {}) {
+  const wasGameOver = isGameOver; // Track previous state for rematch detection
   isGameOver = Boolean(data.isGameOver); winnerId = data.winnerId || null; playerId = data.playerId || playerId;
   if (playerId) localStorage.setItem("lra-player-id", playerId); 
 
@@ -206,6 +206,16 @@ function applyRoomState(data = {}) {
   if (scores[playerId] !== undefined && data.scores && data.scores[playerId] > scores[playerId]) playCollectSound();
 
   const nextPlayers = data.players || {};
+
+  // --- AUTO-FLEE LOGIC ---
+  if (Object.keys(nextPlayers).length === 2) {
+    everHadPartner = true;
+  } else if (everHadPartner && Object.keys(nextPlayers).length < 2 && !isOfflineMode) {
+    handleRoomDestroyed();
+    return;
+  }
+  // -----------------------
+
   if (playerId && players[playerId] && nextPlayers[playerId] && !isGameOver) {
     nextPlayers[playerId] = { ...nextPlayers[playerId], x: players[playerId].x, y: players[playerId].y };
   }
@@ -220,6 +230,22 @@ function applyRoomState(data = {}) {
 
   renderPregameInfo(data);
   checkAndNotifyPartnerReady(data); 
+
+  // --- REMATCH NOTIFICATION LOGIC ---
+  if (wasGameOver && !isGameOver && (!el.resultModal.classList.contains("hidden") || !el.todModal.classList.contains("hidden") || !el.todWaitModal.classList.contains("hidden"))) {
+    el.todModal.classList.add("hidden");
+    el.todWaitModal.classList.add("hidden");
+    el.resultModal.classList.remove("hidden");
+    
+    el.resultTitle.textContent = "⚔️ Rematch Requested!";
+    const partnerId = Object.keys(names).find(id => id !== playerId);
+    const partnerName = partnerId ? names[partnerId] : "Your partner";
+    el.resultBody.textContent = `${partnerName} wants to play again. Do you accept?`;
+    
+    el.todResultBox.classList.add("hidden");
+    el.playAgainBtn.textContent = "Accept Rematch";
+    return; // Skip normal game over handling
+  }
 
   if (isGameOver) {
     if (data.todData && !data.todData.completed) handleTodPhase(data.todData);
@@ -264,6 +290,7 @@ el.submitTodBtn.addEventListener("click", async () => {
 
 function showFinalResultModal(todData) {
   el.todWaitModal.classList.add("hidden"); el.todModal.classList.add("hidden");
+  el.playAgainBtn.textContent = "Play Again"; // Reset button text naturally
   
   if (winnerId === "draw") { el.resultTitle.textContent = "Time Has Expired"; el.resultBody.textContent = "It is a draw. The spirits are appeased."; el.todResultBox.classList.add("hidden"); } 
   else if (winnerId === playerId) { el.resultTitle.textContent = "👑 Victorious!"; el.resultBody.textContent = "You conquered the trial. Here is your partner's confession:"; } 
@@ -290,6 +317,7 @@ function startPolling() {
 // --- PURELY LOCAL OFFLINE BOT LOGIC ---
 function startOfflineMode() {
   initAudio(); isOfflineMode = true; playerId = "local-player"; const botId = "bot-player";
+  everHadPartner = false; 
   activeMaxScore = getCustomScore(); activeTimeLimit = getCustomTime();
 
   players = { [playerId]: { x: 100, y: 100, color: "#8a1c1c" }, [botId]: { x: 860, y: 500, color: "#d4af37" } };
@@ -361,21 +389,17 @@ el.exitGameBtn.addEventListener("click", () => {
   el.exitGameBtn.textContent = "Exiting...";
   el.exitGameBtn.disabled = true;
 
-  // 1. Explicitly clear the local storage keys to forget the session
   localStorage.removeItem("lra-room-code");
   localStorage.removeItem("lra-player-id");
   localStorage.removeItem("lra-offline");
   
-  // 2. Stop the game loop instantly
   isGameOver = true;
   if (pollTimer) clearInterval(pollTimer);
 
-  // 3. If it's a multiplayer match, tell the database you are leaving (fire-and-forget)
   if (!isOfflineMode && roomCode && roomCode !== "LOCAL") {
     convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }).catch(() => {});
   }
 
-  // 4. Force navigation to the clean base URL
   window.location.href = window.location.pathname; 
 });
 
@@ -384,26 +408,21 @@ el.leaveRoomBtn.addEventListener("click", () => {
   el.leaveRoomBtn.textContent = "Exiting...";
   el.leaveRoomBtn.disabled = true;
 
-  // 1. Explicitly clear the local storage keys to forget the session
   localStorage.removeItem("lra-room-code");
   localStorage.removeItem("lra-player-id");
   localStorage.removeItem("lra-offline");
 
-  // 2. Stop the game loop instantly
   isGameOver = true;
   if (pollTimer) clearInterval(pollTimer);
 
-  // 3. If it's a multiplayer match, tell the database you are leaving (fire-and-forget)
   if (!isOfflineMode && roomCode && roomCode !== "LOCAL") { 
     convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }).catch(() => {}); 
   }
   
-  // 4. Force navigation to the clean base URL
   window.location.href = window.location.pathname; 
 });
 
 el.createBotBtn.addEventListener("click", async () => {
-  // If the user is currently in a live multiplayer room, leave it first
   if (roomCode && playerId && !isOfflineMode && roomCode !== "LOCAL") {
     try { await convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }); } catch (e) {}
     roomCode = null;
@@ -413,8 +432,8 @@ el.createBotBtn.addEventListener("click", async () => {
 
 el.createRoomBtn.addEventListener("click", async () => {
   initAudio();
+  everHadPartner = false; 
 
-  // 1. Client-Side Check: If we already know the user is in a room
   if (roomCode && playerId && !isOfflineMode && !isGameOver) {
     if (window.confirm(`You are already in room ${roomCode}.\n\nPress OK to resume it, or Cancel to leave it and create a new room.`)) { 
       resumeCurrentRoom(); 
@@ -425,7 +444,6 @@ el.createRoomBtn.addEventListener("click", async () => {
       } catch (e) {}
       return; 
     }
-    // If they hit Cancel, leave the room so we can create a new one
     try { await convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }); } catch (e) {}
     roomCode = null;
   }
@@ -438,12 +456,10 @@ el.createRoomBtn.addEventListener("click", async () => {
   } catch (e) { 
     let errorMessage = e.message || "Failed to open chamber.";
     
-    // 2. Clean up messy backend stack traces
     if (errorMessage.includes("Uncaught Error:")) {
       errorMessage = errorMessage.split("Uncaught Error:")[1].split("at handler")[0].trim();
     }
 
-    // 3. Server-Side Error Handling: Present a clean modal if the backend blocked creation
     if (errorMessage.toLowerCase().includes("active chamber") && roomCode) {
       if (window.confirm(`${errorMessage}\n\nPress OK to resume your chamber, or Cancel to leave it.`)) {
         resumeCurrentRoom();
@@ -460,8 +476,6 @@ el.createRoomBtn.addEventListener("click", async () => {
         return;
       }
     }
-    
-    // Display any other cleaned-up errors normally
     el.joinError.textContent = errorMessage; 
   }
 });
@@ -475,6 +489,7 @@ el.closeHostShareBtn.addEventListener("click", () => el.hostShareModal.classList
 
 el.joinRoomBtn.addEventListener("click", async () => {
   initAudio(); const code = el.roomCodeInput.value.toUpperCase().trim(); isOfflineMode = false;
+  everHadPartner = false;
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.joinRoom, { loverName: getLoverName(), roomCode: code, deviceId: localDeviceId });
     roomCode = code; applyRoomState(data); saveSessionState(roomCode, playerId, false); setStatus("Awake", "online"); startPolling();
@@ -491,13 +506,10 @@ el.playAgainBtn.addEventListener("click", async () => {
   scores = {}; if (playerId) scores[playerId] = 0;
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.playAgain, { roomCode, playerId });
-    el.readyBtn.disabled = false; el.readyBtn.textContent = "I am Ready"; todPhaseActive = false; applyRoomState(data);
+    el.readyBtn.disabled = false; el.readyBtn.textContent = "I am Ready"; todPhaseActive = false; 
+    applyRoomState(data);
+    window.location.reload(); // Auto refresh for seamless rematch loading
   } catch(e) {}
-});
-
-el.leaveRoomBtn.addEventListener("click", async () => {
-  if(roomCode && playerId && !isOfflineMode) { try { await convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }); } catch(e) {} }
-  clearSessionState(); window.location.reload();
 });
 
 // --- MOVEMENT & RENDER LOOP ---
