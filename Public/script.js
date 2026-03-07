@@ -3,28 +3,34 @@ const ctx = canvas.getContext("2d");
 
 const LOVE_SONGS = [
   {
-    id: "romantic-piano",
-    title: "Romantic Piano",
-    artist: "Ashot-Danielyan-Composer",
-    streamUrl: "https://cdn.pixabay.com/download/audio/2022/05/16/audio_8f27f30f89.mp3?filename=romantic-11157.mp3",
+    id: "1st-song",
+    title: "Need You",
+    artist: "Fireboy DML",
+    streamUrl: "./Fireboy-DML-Need-You-(TrendyBeatz.com).mp3",
   },
   {
-    id: "tenderness",
-    title: "Tenderness",
-    artist: "Lesfm",
-    streamUrl: "https://cdn.pixabay.com/download/audio/2022/02/10/audio_d9d83ff4f1.mp3?filename=tenderness-2456.mp3",
+    id: "2nd-song",
+    title: "Arike",
+    artist: "Kunmie",
+    streamUrl: "./Kunmie-Arike-(TrendyBeatz.com).mp3",
   },
   {
-    id: "love-ballad",
-    title: "Love Ballad",
-    artist: "AleksandrKarabanov",
-    streamUrl: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_5ef43abf49.mp3?filename=love-ballad-16017.mp3",
+    id: "3rd-song",
+    title: "Morenikeji",
+    artist: "Konstant",
+    streamUrl: "./Konstant - Morenikeji.mp3",
   },
   {
-    id: "romantic-day",
-    title: "Romantic Day",
-    artist: "Ashot-Danielyan-Composer",
-    streamUrl: "https://cdn.pixabay.com/download/audio/2022/10/25/audio_7783f34577.mp3?filename=romantic-day-124856.mp3",
+    id: "4th-song",
+    title: "Those Eyes",
+    artist: "New West",
+    streamUrl: "./New_West_-_Those_Eyes_CeeNaija.com_.mp3",
+  },
+  {
+    id: "5th-song",
+    title: "Orente",
+    artist: "Adekunle Gold",
+    streamUrl: "./Adekunle-Gold-Orente--[TunezJam.com].mp3",
   },
 ];
 
@@ -33,8 +39,8 @@ let audioCtx;
 const streamPlayer = new Audio();
 streamPlayer.loop = true;
 streamPlayer.preload = "auto";
-streamPlayer.crossOrigin = "anonymous";
-streamPlayer.volume = 0.5;
+// streamPlayer.crossOrigin = "anonymous";
+streamPlayer.volume = 0.4;
 let soundEnabled = true;
 let selectedSongId = LOVE_SONGS[0].id;
 
@@ -685,6 +691,19 @@ function draw() {
     ctx.fillText(mine ? "You" : names[id], p.x, p.y - 25);
   });
 }
+
+// --- AUTO PAUSE/RESUME ON TAB CHANGE ---
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    // Pause the music when the tab is inactive
+    streamPlayer.pause();
+  } else {
+    // Resume the music when they come back, ONLY if sound is actually enabled
+    if (soundEnabled) {
+      streamPlayer.play().catch(() => {});
+    }
+  }
+});
 
 function gameLoop() {
   moveSelf(); 
