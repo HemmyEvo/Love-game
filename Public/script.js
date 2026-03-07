@@ -39,7 +39,6 @@ let audioCtx;
 const streamPlayer = new Audio();
 streamPlayer.loop = true;
 streamPlayer.preload = "auto";
-// streamPlayer.crossOrigin = "anonymous";
 streamPlayer.volume = 0.4;
 let soundEnabled = true;
 let selectedSongId = LOVE_SONGS[0].id;
@@ -112,7 +111,7 @@ const el = {
   soundToggleBtn: document.getElementById("soundToggleBtn"),
   roomCodeInput: document.getElementById("roomCodeInput"),
   createRoomBtn: document.getElementById("createRoomBtn"),
-  createBotBtn: document.getElementById("createBotBtn"), // Re-enabled Bot Button
+  createBotBtn: document.getElementById("createBotBtn"),
   joinRoomBtn: document.getElementById("joinRoomBtn"),
   readyBtn: document.getElementById("readyBtn"),
   
@@ -237,7 +236,7 @@ let playerId = null, roomCode = null;
 let players = {}, renderPlayers = {}, loveItems = [], scores = {}, names = {};
 let isGameOver = false, winnerId = null;
 let gameStartTime = null, pollTimer = null, todPhaseActive = false;
-let isOfflineMode = false; // Flag to isolate bot matches from the DB
+let isOfflineMode = false;
 
 const CONVEX_PROXY_URL = "/api/convex";
 const CONVEX_FUNCTIONS = {
@@ -258,13 +257,27 @@ const localDeviceId = (() => {
 })();
 
 const joystickState = { x: 0, y: 0, active: false };
-const lastSentMove = { x: null, y: null, at: 0 };
+const lastSentMove = { x: null, y: null, socketAt: 0, convexAt: 0 };
 const keys = new Set();
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const getLoverName = () => el.loverName.value.trim() || "Wanderer";
 const getCustomScore = () => clamp(parseInt(el.targetScoreInput.value) || 20, 5, 99);
 const getCustomTime = () => clamp(parseInt(el.timeLimitInput.value) || 60, 15, 300);
+
+// --- SOCKET.IO INITIALIZATION ---
+// Ensure <script src="/socket.io/socket.io.js"></script> is in your index.html
+const socket = window.io ? io() : null;
+
+if (socket) {
+  socket.on("player-moved", (data) => {
+    // Only update position if it's the partner, we handle our own locally
+    if (data.playerId !== playerId && players[data.playerId] && !isGameOver) {
+      players[data.playerId].x = data.x;
+      players[data.playerId].y = data.y;
+    }
+  });
+}
 
 async function convexCall(kind, path, args = {}) {
   const response = await fetch(CONVEX_PROXY_URL, {
@@ -347,8 +360,16 @@ function applyRoomState(data = {}) {
   }
 
   const nextPlayers = data.players || {};
+  // Preserve socket-driven smooth coordinates if they exist
   if (playerId && players[playerId] && nextPlayers[playerId] && !isGameOver) {
-    nextPlayers[playerId] = { ...nextPlayers[playerId], x: players[playerId].x, y: players[playerId].y };
+    nextPlayers[playerId].x = players[playerId].x;
+    nextPlayers[playerId].y = players[playerId].y;
+  }
+  
+  const partnerId = Object.keys(names).find(id => id !== playerId);
+  if (partnerId && players[partnerId] && nextPlayers[partnerId] && !isGameOver) {
+    nextPlayers[partnerId].x = players[partnerId].x;
+    nextPlayers[partnerId].y = players[partnerId].y;
   }
   
   players = nextPlayers; 
@@ -405,13 +426,11 @@ el.submitTodBtn.addEventListener("click", async () => {
   el.submitTodBtn.disabled = true;
 
   if (isOfflineMode) {
-    // Local processing for offline mode
     setTimeout(() => {
       el.todModal.classList.add("hidden");
       showFinalResultModal({ prompt: el.todPromptText.textContent, answer: ans });
     }, 500);
   } else {
-    // Database sync for multiplayer
     try {
       await convexCall("mutation", CONVEX_FUNCTIONS.submitTod, { roomCode, answer: ans });
       el.todModal.classList.add("hidden");
@@ -445,7 +464,7 @@ function showFinalResultModal(todData) {
 
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  // Heavy polling to emulate Socket real-time performance (20ms interval)
+  // Relaxed polling interval to 1000ms because Socket handles all rapid movements now
   pollTimer = setInterval(async () => {
     if (!roomCode || isOfflineMode) return;
     try {
@@ -453,10 +472,10 @@ function startPolling() {
       if (state) {
         applyRoomState(state);
       } else {
-        handleRoomDestroyed(); // The room was deleted (someone left)
+        handleRoomDestroyed();
       }
     } catch (e) {}
-  }, 20);
+  }, 1000);
 }
 
 // --- PURELY LOCAL OFFLINE BOT LOGIC ---
@@ -507,10 +526,8 @@ function finishLocalGame() {
   if (winnerId !== "draw") {
     const promptObj = naughtyPrompts[Math.floor(Math.random() * naughtyPrompts.length)];
     if (winnerId === "bot-player") {
-      // You lost to the bot, you must do a local ToD
       handleTodPhase({ loserId: playerId, prompt: promptObj.text, isDare: promptObj.type === "Dare", completed: false });
     } else {
-      // You won, bot auto-responds
       showFinalResultModal({ prompt: promptObj.text, answer: "*Ancient Spirit Noises* I submit to your power, mortal." });
     }
   } else {
@@ -529,7 +546,6 @@ function runOfflineTick() {
       const d = (item.x - bot.x)**2 + (item.y - bot.y)**2;
       if (d < minDist) { minDist = d; nearest = item; }
     });
-    // Move bot towards nearest heart
     bot.x += Math.sign(nearest.x - bot.x) * 1.5;
     bot.y += Math.sign(nearest.y - bot.y) * 1.5;
   }
@@ -585,6 +601,10 @@ el.createRoomBtn.addEventListener("click", async () => {
     });
     roomCode = data.roomCode; applyRoomState(data); setStatus("Awake", "online");
     el.hostCodeDisplay.textContent = roomCode; el.hostShareModal.classList.remove("hidden");
+    
+    // Join socket channel to stream data
+    if(socket) socket.emit("join-room", roomCode);
+    
     startPolling();
   } catch (e) { el.joinError.textContent = e.message || "Failed to open chamber."; }
 });
@@ -607,7 +627,12 @@ el.joinRoomBtn.addEventListener("click", async () => {
   isOfflineMode = false;
   try {
     const data = await convexCall("mutation", CONVEX_FUNCTIONS.joinRoom, { loverName: getLoverName(), roomCode: code, deviceId: localDeviceId });
-    roomCode = code; applyRoomState(data); setStatus("Awake", "online"); startPolling();
+    roomCode = code; applyRoomState(data); setStatus("Awake", "online"); 
+    
+    // Join socket channel
+    if(socket) socket.emit("join-room", roomCode);
+    
+    startPolling();
   } catch (e) { el.joinError.textContent = e.message || "Failed to enter chamber."; }
 });
 
@@ -632,7 +657,6 @@ el.playAgainBtn.addEventListener("click", async () => {
   } catch(e) {}
 });
 
-// Explicit Leave Room functionality
 el.leaveRoomBtn.addEventListener("click", async () => {
   if(roomCode && playerId && !isOfflineMode) {
     try { await convexCall("mutation", CONVEX_FUNCTIONS.leaveRoom, { roomCode, playerId }); } catch(e) {}
@@ -659,9 +683,18 @@ el.joystick.addEventListener("pointermove", e => { if (joystickState.active) mov
 async function sendMove(x, y) {
   if (isOfflineMode || !roomCode || !playerId || isGameOver) return;
   const now = Date.now(); 
-  if (now - lastSentMove.at < 20) return; // Ultra-fast 20ms send throttle to simulate true socket stream
-  lastSentMove.x = x; lastSentMove.y = y; lastSentMove.at = now;
-  try { await convexCall("mutation", CONVEX_FUNCTIONS.move, { roomCode, playerId, x, y }); } catch (e) {}
+
+  // Fast emit to Socket.io for immediate visual update (~60 FPS)
+  if (socket && now - lastSentMove.socketAt >= 16) {
+    socket.emit("player-move", { roomCode, playerId, x, y });
+    lastSentMove.socketAt = now;
+  }
+
+  // Slower emit to Convex to process collisions and game state in the DB (~10 FPS)
+  if (now - lastSentMove.convexAt >= 100) {
+    lastSentMove.convexAt = now;
+    try { await convexCall("mutation", CONVEX_FUNCTIONS.move, { roomCode, playerId, x, y }); } catch (e) {}
+  }
 }
 
 function moveSelf() {
@@ -695,10 +728,8 @@ function draw() {
 // --- AUTO PAUSE/RESUME ON TAB CHANGE ---
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    // Pause the music when the tab is inactive
     streamPlayer.pause();
   } else {
-    // Resume the music when they come back, ONLY if sound is actually enabled
     if (soundEnabled) {
       streamPlayer.play().catch(() => {});
     }
@@ -717,7 +748,6 @@ function gameLoop() {
     if (!renderPlayers[id]) {
       renderPlayers[id] = { ...target };
     } else { 
-      // INSTANT SNAP: no more lag/lerping for true real-time multiplayer feel
       renderPlayers[id].x = target.x; 
       renderPlayers[id].y = target.y; 
       renderPlayers[id].color = target.color; 
