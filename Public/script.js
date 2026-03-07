@@ -6,7 +6,7 @@ const LOVE_SONGS = [
     id: "1st-song",
     title: "Need You",
     artist: "Fireboy DML",
-    streamUrl: "./Fireboy-DML-Need-You-(TrendyBeatz.com).mp3",
+    streamUrl: "./Fireboy-DML-Need-You-[TrendyBeatz.com].mp3",
   },
   {
     id: "2nd-song",
